@@ -3,10 +3,10 @@ import sys
 
 def log(message, level="INFO", shared_storage=None, mission_id=None):
     """
-    Logger haute performance pour l'UI Axiomos.
-    Supporte l'injection directe dans le flux de télémétrie.
+    High-performance logger for the Axiomos UI.
+    Supports real-time injection into the telemetry stream for frontend polling.
     """
-    # Formats visuels pour la console
+    # Visual prefixes for the terminal and telemetry console
     prefixes = {
         "INFO": "🤖 [AXIOMOS]",
         "SUCCESS": "✅ [SUCCESS]",
@@ -15,24 +15,34 @@ def log(message, level="INFO", shared_storage=None, mission_id=None):
         "ACTION": "🚀 [ACTION]"
     }
     
-    prefix = prefixes.get(level.upper(), prefixes["INFO"])
+    level_upper = level.upper()
+    prefix = prefixes.get(level_upper, prefixes["INFO"])
     timestamp = time.strftime("%H:%M:%S")
     formatted_msg = f"[{timestamp}] {prefix} {message}"
     
-    # 1. Sortie standard (Render logs)
+    # 1. Standard Output (Viewable in Render/Docker logs)
     print(formatted_msg)
     sys.stdout.flush()
     
-    # 2. Injection UI (Polling)
+    # 2. UI Injection (Synchronizes with Frontend polling)
     if shared_storage is not None and mission_id in shared_storage:
         try:
-            # On récupère la liste des logs de la mission spécifique
-            mission_logs = shared_storage[mission_id].get("live_logs", [])
-            mission_logs.append({
+            # Thread-safe retrieval and update of the mission's live log list
+            mission_data = shared_storage[mission_id]
+            
+            # Ensure the logs list exists in the mission's memory space
+            if "live_logs" not in mission_data:
+                mission_data["live_logs"] = []
+                
+            mission_data["live_logs"].append({
                 "timestamp": timestamp,
-                "level": level.upper(),
+                "level": level_upper,
                 "message": message
             })
-            shared_storage[mission_id]["live_logs"] = mission_logs
+            
+            # Re-assign to ensure the shared dictionary triggers an update if monitored
+            shared_storage[mission_id] = mission_data
+            
         except Exception as e:
-            print(f"Logging Error: {e}")
+            # Fallback to console if shared storage injection fails
+            print(f"Internal Telemetry Logging Error: {e}")

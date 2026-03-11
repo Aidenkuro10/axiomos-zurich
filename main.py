@@ -1,9 +1,9 @@
 import uuid
 import time
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from agent.apify_client import launch_apify_automation
 from services.data_analyzer import analyze_market_deals
 from services.report_builder import generate_final_report
+from config.secrets import AXIOMOS_INTERNAL_AUTH
 
 class MissionManager:
     """Centralized in-memory storage for LuxSoft polling sessions."""
@@ -40,7 +41,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.1.0_ZRH",
+        "version": "2.2.0_ZRH",
         "uptime_node": "Render Frankfurt"
     }
 
@@ -95,7 +96,15 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             MissionManager.missions[mission_id]["status"] = "error"
 
 @app.post("/run-mission")
-async def start_mission(request: MissionRequest, background_tasks: BackgroundTasks):
+async def start_mission(
+    request: MissionRequest, 
+    background_tasks: BackgroundTasks, 
+    x_axiomos_auth: Optional[str] = Header(None)
+):
+    # Security handshake check
+    if x_axiomos_auth != AXIOMOS_INTERNAL_AUTH:
+        raise HTTPException(status_code=401, detail="Unauthorized Uplink")
+
     mission_id = str(uuid.uuid4())[:8]
     
     # Initialize data structure with stream_url field for the UI
@@ -119,7 +128,11 @@ async def start_mission(request: MissionRequest, background_tasks: BackgroundTas
     }
 
 @app.get("/mission-status/{mission_id}")
-async def get_mission_status(mission_id: str):
+async def get_mission_status(mission_id: str, x_axiomos_auth: Optional[str] = Header(None)):
+    # Security handshake check for polling
+    if x_axiomos_auth != AXIOMOS_INTERNAL_AUTH:
+         raise HTTPException(status_code=401, detail="Unauthorized Status Request")
+
     if mission_id not in MissionManager.missions:
         raise HTTPException(status_code=404, detail="Mission ID not found")
     return MissionManager.missions[mission_id]

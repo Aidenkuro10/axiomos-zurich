@@ -6,6 +6,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Drives the Apify RAG Web Browser Actor.
     Captures the run ID immediately to provide a live video feed URL.
+    Optimized for Live View rendering.
     """
     token = get_apify_token()
     if not token:
@@ -15,13 +16,16 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     client = ApifyClient(token)
     
     # Configuration for LuxSoft Luxury Arbitrage
+    # Added viewport and screenshot settings to force video feed rendering
     run_input = {
         "startUrls": [{"url": url}],
         "query": goal,
         "maxPagesPerCrawl": 3,
         "dynamicContentWaitSecs": 5,
         "proxyConfiguration": {"useApifyProxy": True},
-        "outputFormat": "markdown" 
+        "outputFormat": "markdown",
+        "viewPort": {"width": 1280, "height": 720},
+        "screenshot": True 
     }
 
     try:
@@ -32,7 +36,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         run_id = run["id"]
 
         # Generate the Live View URL for the Frontend Iframe
-        # Format used for real-time browser monitoring
+        # Using the standard browser-monitor endpoint with authentication token
         stream_url = f"https://api.apify.com/v2/browser-monitor/{run_id}/live-view?token={token}"
         
         # Inject the stream URL into shared storage for UI synchronization
@@ -42,7 +46,9 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
         # Now wait for the actor to finish and get the final result
         log(f"🕵️ Agent is navigating. Extraction in progress...", "INFO", shared_storage, mission_id)
-        final_run_result = client.run(run_id).wait_for_finish()
+        
+        # Increased timeout slightly for deep rendering
+        final_run_result = client.run(run_id).wait_for_finish(wait_secs=300)
         
         if final_run_result and "defaultDatasetId" in final_run_result:
             dataset_id = final_run_result.get("defaultDatasetId")

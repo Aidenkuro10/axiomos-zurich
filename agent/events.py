@@ -2,12 +2,13 @@ from enum import Enum
 
 class MissionStatus(str, Enum):
     """
-    États standardisés pour le cycle de vie d'une mission Axiomos.
+    Standardized states for the Axiomos mission lifecycle.
+    Used for frontend synchronization and backend orchestration.
     """
-    INITIALIZING = "INITIALIZING"    # Handshake avec Apify
-    SCANNING = "SCANNING"            # Navigation sur le site cible
-    EXTRACTING = "EXTRACTING"        # Récupération des données brutes
-    ANALYZING = "ANALYZING"          # Passage dans data_analyzer.py
-    STORING = "STORING"              # Indexation dans Qdrant
-    COMPLETED = "COMPLETED"          # Mission réussie
-    FAILED = "FAILED"                # Erreur critique
+    INITIALIZING = "initializing"    # Apify Handshake & Actor startup
+    RUNNING = "running"              # Agent is live and navigating
+    EXTRACTING = "extracting"        # Raw data retrieval from dataset
+    ANALYZING = "analyzing"          # Processing through data_analyzer.py
+    STORING = "storing"              # Vector indexing in Qdrant
+    COMPLETED = "completed"          # Mission successful
+    FAILED = "failed"                # Critical failure or empty dataset
