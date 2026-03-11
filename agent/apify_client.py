@@ -2,28 +2,45 @@ from apify_client import ApifyClient
 from config.secrets import get_apify_token
 from utils.logger import log
 
-def launch_apify_automation(url, goal):
+def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Lance un agent de navigation autonome sur Apify.
-    Cible l'Actor 'apify/web-scraper' ou un modèle personnalisé GenAI.
+    Pilote l'Actor RAG Web Browser d'Apify pour extraire intelligemment 
+    les données de luxe sans erreurs de configuration.
     """
-    client = ApifyClient(get_apify_token())
+    # Récupération sécurisée du token
+    token = get_apify_token()
+    if not token:
+        log("❌ Token Apify manquant dans les secrets", "ERROR", shared_storage, mission_id)
+        return None
+
+    client = ApifyClient(token)
     
-    # Configuration de l'Actor (Navigateur intelligent)
+    # Configuration optimisée pour LuxSoft (Arbitrage de luxe)
+    # Cet Actor "lit" la page et la convertit en texte/markdown pour l'IA
     run_input = {
         "startUrls": [{"url": url}],
-        "instructions": goal, # Ton prompt stratégique
+        "maxPagesPerCrawl": 3,
+        "dynamicContentWaitSecs": 5,
         "proxyConfiguration": {"useApifyProxy": True},
-        "maxPagesPerCrawl": 10
+        "outputFormat": "markdown" 
     }
 
     try:
-        log(f"📡 Handshake Apify amorcé pour {url}...", "INFO")
-        # On lance l'Actor. Pour le hackathon, on utilise 'run' 
-        # mais on peut streamer les logs via leur API de log.
-        run = client.actor("apify/web-scraper").call(run_input=run_input)
+        log(f"📡 Handshake Apify amorcé pour {url}...", "INFO", shared_storage, mission_id)
         
-        return run.get("defaultDatasetId") # On récupère l'ID des données
+        # Appel de l'Actor RAG Web Browser (plus moderne et flexible)
+        # .call() est bloquant, ce qui est parfait car il tourne dans ton ThreadPoolExecutor
+        run = client.actor("apify/rag-web-browser").call(run_input=run_input)
+        
+        if run and "id" in run:
+            log(f"✅ Scan Apify terminé (Run ID: {run['id']})", "SUCCESS", shared_storage, mission_id)
+            return run.get("defaultDatasetId")
+        else:
+            log("❌ L'Actor Apify n'a pas renvoyé de résultat valide.", "ERROR", shared_storage, mission_id)
+            return None
+            
     except Exception as e:
-        log(f"❌ Échec Apify : {str(e)}", "ERROR")
+        # Capture l'erreur exacte pour ton interface de télémétrie
+        error_msg = str(e)
+        log(f"❌ Échec Apify : {error_msg}", "ERROR", shared_storage, mission_id)
         return None
