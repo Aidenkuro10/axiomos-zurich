@@ -41,7 +41,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.1_ZRH",
+        "version": "2.2.2_ZRH",
         "uptime_node": "Render Frankfurt"
     }
 
@@ -100,9 +100,13 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Security handshake check using the aliased header
-    if x_axiomos_auth != AXIOMOS_INTERNAL_AUTH:
-        print(f"AUTH_FAILURE: Received {x_axiomos_auth}") # Visible in Render Logs
+    # --- ROBUST AUTHENTICATION SANITIZER ---
+    # Removes spaces, quotes, and newlines that often sneak into Render env vars
+    received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
+    expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
+
+    if received != expected:
+        print(f"AUTH_FAILURE: Received [{received}] but internal config expects [{expected}]")
         raise HTTPException(status_code=401, detail="Unauthorized Uplink")
 
     mission_id = str(uuid.uuid4())[:8]
@@ -132,8 +136,10 @@ async def get_mission_status(
     mission_id: str, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Security handshake check for polling
-    if x_axiomos_auth != AXIOMOS_INTERNAL_AUTH:
+    received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
+    expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
+
+    if received != expected:
          raise HTTPException(status_code=401, detail="Unauthorized Status Request")
 
     if mission_id not in MissionManager.missions:
