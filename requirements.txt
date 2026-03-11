@@ -4,6 +4,7 @@ python-multipart
 apify-client
 openai
 pydantic
+pydantic-settings
 python-dotenv
 qdrant-client
 requests
