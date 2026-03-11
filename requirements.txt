@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+apify-client
+openai
+pydantic
+python-dotenv
+qdrant-client
+requests

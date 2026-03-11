@@ -1,0 +1,30 @@
+# Configuration / Secrets
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Python - Fichiers compilés et cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# Distribution / Build
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+logs/
+
+# Systèmes d'exploitation
+.DS_Store
+Thumbs.db
+
+# IDEs (Optionnel, mais recommandé)
+.vscode/
+.idea/
