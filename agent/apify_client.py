@@ -4,8 +4,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Pilote l'Actor RAG Web Browser d'Apify pour extraire intelligemment 
-    les données de luxe sans erreurs de configuration.
+    Pilote l'Actor RAG Web Browser d'Apify.
+    Incorpore le champ 'query' pour l'extraction intelligente.
     """
     # Récupération sécurisée du token
     token = get_apify_token()
@@ -15,10 +15,11 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
     client = ApifyClient(token)
     
-    # Configuration optimisée pour LuxSoft (Arbitrage de luxe)
-    # Cet Actor "lit" la page et la convertit en texte/markdown pour l'IA
+    # Configuration pour LuxSoft (Arbitrage de luxe)
+    # Note : 'query' est obligatoire pour cet Actor
     run_input = {
         "startUrls": [{"url": url}],
+        "query": goal,
         "maxPagesPerCrawl": 3,
         "dynamicContentWaitSecs": 5,
         "proxyConfiguration": {"useApifyProxy": True},
@@ -28,8 +29,8 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"📡 Handshake Apify amorcé pour {url}...", "INFO", shared_storage, mission_id)
         
-        # Appel de l'Actor RAG Web Browser (plus moderne et flexible)
-        # .call() est bloquant, ce qui est parfait car il tourne dans ton ThreadPoolExecutor
+        # Appel de l'Actor RAG Web Browser
+        # Le timeout par défaut est suffisant pour le crawling initial
         run = client.actor("apify/rag-web-browser").call(run_input=run_input)
         
         if run and "id" in run:
@@ -40,7 +41,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             return None
             
     except Exception as e:
-        # Capture l'erreur exacte pour ton interface de télémétrie
+        # Capture l'erreur exacte pour ton interface de télémétrie LuxSoft
         error_msg = str(e)
         log(f"❌ Échec Apify : {error_msg}", "ERROR", shared_storage, mission_id)
         return None
