@@ -7,21 +7,21 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Import de tes services LuxSoft
+# Internal LuxSoft service imports
 from agent.apify_client import launch_apify_automation
 from services.data_analyzer import analyze_market_deals
 from services.report_builder import generate_final_report
 
 class MissionManager:
-    """Stockage centralisé pour le polling de LuxSoft."""
+    """Centralized in-memory storage for LuxSoft polling sessions."""
     missions: Dict[str, Dict[str, Any]] = {}
 
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 
-# Exécuteur pour gérer les appels bloquants (Apify/Requests) sans geler l'API
+# ThreadPoolExecutor handles blocking I/O calls (Apify/Requests) without freezing the Event Loop
 executor = ThreadPoolExecutor(max_workers=10)
 
-# --- CONFIGURATION CORS (Optimisée pour ton UI) ---
+# --- CORS CONFIGURATION ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -46,16 +46,16 @@ def read_root():
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
     """
-    Orchestrateur de la mission. 
-    Enchaîne l'extraction, l'analyse d'arbitrage et la génération du rapport.
+    Mission Orchestrator. 
+    Sequentially executes extraction, arbitrage analysis, and report generation.
     """
     loop = asyncio.get_event_loop()
     try:
         storage = MissionManager.missions
         shared_mem = storage[mission_id]
         
-        # --- Phase 1: Extraction via Apify ---
-        # On passe storage et mission_id pour que apify_client puisse logger en direct
+        # --- Phase 1: Data Extraction via Apify ---
+        # launch_apify_automation now populates shared_mem["stream_url"] internally
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, storage, mission_id
         )
@@ -63,13 +63,12 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
         if dataset_id:
             shared_mem["status"] = "analyzing"
             
-            # --- Phase 2: Analyse LuxSoft (Arbitrage Réel) ---
-            # Correction : on envoie le dataset_id réel pour l'analyse
+            # --- Phase 2: LuxSoft Analysis ---
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, storage, mission_id
             )
             
-            # --- Phase 3: Rapport Stratégique ---
+            # --- Phase 3: Strategic Reporting ---
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, storage
             )
@@ -80,18 +79,18 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             shared_mem["live_logs"].append({
                 "timestamp": time.strftime("%H:%M:%S"),
                 "level": "SUCCESS",
-                "message": "📡 Transmission du rapport final terminée. Mission Close."
+                "message": "📡 Final report transmission complete. Mission closed."
             })
         else:
             shared_mem["status"] = "failed"
             shared_mem["live_logs"].append({
                 "timestamp": time.strftime("%H:%M:%S"),
                 "level": "ERROR",
-                "message": "❌ Échec de la mission : l'extraction a retourné un dataset vide."
+                "message": "❌ Mission failed: Extraction returned an empty dataset."
             })
             
     except Exception as e:
-        print(f"💥 Erreur Critique LuxSoft {mission_id}: {str(e)}")
+        print(f"💥 Critical LuxSoft Error {mission_id}: {str(e)}")
         if mission_id in MissionManager.missions:
             MissionManager.missions[mission_id]["status"] = "error"
 
@@ -99,18 +98,18 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
 async def start_mission(request: MissionRequest, background_tasks: BackgroundTasks):
     mission_id = str(uuid.uuid4())[:8]
     
-    # Initialisation de la structure de données pour le polling
+    # Initialize data structure with stream_url field for the UI
     MissionManager.missions[mission_id] = {
         "status": "running",
+        "stream_url": None, # Will be updated dynamically by the agent
         "live_logs": [{
             "timestamp": time.strftime("%H:%M:%S"),
             "level": "INFO",
-            "message": f"Uplink LuxSoft établi. Session {mission_id} active."
+            "message": f"LuxSoft uplink established. Session {mission_id} active."
         }],
         "report": None
     }
     
-    # Lancement en arrière-plan
     background_tasks.add_task(execute_mission_task, mission_id, request.url, request.goal)
     
     return {
@@ -122,5 +121,5 @@ async def start_mission(request: MissionRequest, background_tasks: BackgroundTas
 @app.get("/mission-status/{mission_id}")
 async def get_mission_status(mission_id: str):
     if mission_id not in MissionManager.missions:
-        raise HTTPException(status_code=404, detail="Mission ID introuvable")
+        raise HTTPException(status_code=404, detail="Mission ID not found")
     return MissionManager.missions[mission_id]

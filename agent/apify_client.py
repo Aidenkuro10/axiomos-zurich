@@ -4,19 +4,17 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Pilote l'Actor RAG Web Browser d'Apify.
-    Incorpore le champ 'query' pour l'extraction intelligente.
+    Drives the Apify RAG Web Browser Actor.
+    Captures the run ID immediately to provide a live video feed URL.
     """
-    # Récupération sécurisée du token
     token = get_apify_token()
     if not token:
-        log("❌ Token Apify manquant dans les secrets", "ERROR", shared_storage, mission_id)
+        log("❌ Apify Token missing in secrets", "ERROR", shared_storage, mission_id)
         return None
 
     client = ApifyClient(token)
     
-    # Configuration pour LuxSoft (Arbitrage de luxe)
-    # Note : 'query' est obligatoire pour cet Actor
+    # Configuration for LuxSoft Luxury Arbitrage
     run_input = {
         "startUrls": [{"url": url}],
         "query": goal,
@@ -27,21 +25,34 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     }
 
     try:
-        log(f"📡 Handshake Apify amorcé pour {url}...", "INFO", shared_storage, mission_id)
+        log(f"📡 Initiating Apify handshake for {url}...", "INFO", shared_storage, mission_id)
         
-        # Appel de l'Actor RAG Web Browser
-        # Le timeout par défaut est suffisant pour le crawling initial
-        run = client.actor("apify/rag-web-browser").call(run_input=run_input)
+        # Start the actor (non-blocking) to get the run ID immediately
+        run = client.actor("apify/rag-web-browser").start(run_input=run_input)
+        run_id = run["id"]
+
+        # Generate the Live View URL for the Frontend Iframe
+        # Format used for real-time browser monitoring
+        stream_url = f"https://api.apify.com/v2/browser-monitor/{run_id}/live-view?token={token}"
         
-        if run and "id" in run:
-            log(f"✅ Scan Apify terminé (Run ID: {run['id']})", "SUCCESS", shared_storage, mission_id)
-            return run.get("defaultDatasetId")
+        # Inject the stream URL into shared storage for UI synchronization
+        if shared_storage and mission_id in shared_storage:
+            shared_storage[mission_id]["stream_url"] = stream_url
+            log(f"📡 Live feed synchronized. Agent ID: {run_id}", "ACTION", shared_storage, mission_id)
+
+        # Now wait for the actor to finish and get the final result
+        log(f"🕵️ Agent is navigating. Extraction in progress...", "INFO", shared_storage, mission_id)
+        final_run_result = client.run(run_id).wait_for_finish()
+        
+        if final_run_result and "defaultDatasetId" in final_run_result:
+            dataset_id = final_run_result.get("defaultDatasetId")
+            log(f"✅ Apify scan complete (Dataset ID: {dataset_id})", "SUCCESS", shared_storage, mission_id)
+            return dataset_id
         else:
-            log("❌ L'Actor Apify n'a pas renvoyé de résultat valide.", "ERROR", shared_storage, mission_id)
+            log("❌ Apify Actor failed to return a valid dataset.", "ERROR", shared_storage, mission_id)
             return None
             
     except Exception as e:
-        # Capture l'erreur exacte pour ton interface de télémétrie LuxSoft
         error_msg = str(e)
-        log(f"❌ Échec Apify : {error_msg}", "ERROR", shared_storage, mission_id)
+        log(f"❌ Apify failure: {error_msg}", "ERROR", shared_storage, mission_id)
         return None
