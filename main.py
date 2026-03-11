@@ -1,78 +1,108 @@
 import uuid
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+import time
+import asyncio
+from typing import Dict, Any
+from concurrent.futures import ThreadPoolExecutor
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from threading import Thread
+from pydantic import BaseModel
 
-# Import de tes briques Axiomos
-from config.settings import settings
-from models.mission import MissionRequest
-from agent.runner import run_mission_orchestrator
-from utils.logger import log
+# Import de tes services LuxSoft
+from agent.apify_client import launch_apify_automation
+from services.data_analyzer import analyze_market_deals
+from services.report_builder import generate_final_report
 
-app = FastAPI(title=settings.PROJECT_NAME)
+class MissionManager:
+    """Stockage centralisé pour le polling de LuxSoft."""
+    missions: Dict[str, Dict[str, Any]] = {}
 
-# --- CONFIGURATION CORS (Pour ton déploiement Cloudflare) ---
+app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
+
+executor = ThreadPoolExecutor(max_workers=10)
+
+# --- CONFIGURATION CORS (Identique à TinyFix) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
-# Stockage temporaire en RAM (Shared Storage)
-# Pour une démo de hackathon, c'est plus rapide qu'une DB
-missions_context = {}
+class MissionRequest(BaseModel):
+    url: str
+    goal: str
 
 @app.get("/")
-async def root():
-    return {"status": "online", "system": settings.PROJECT_NAME, "version": settings.VERSION}
+def read_root():
+    return {"status": "online", "service": "LuxSoft Engine", "version": "2.1.0"}
+
+async def execute_mission_task(mission_id: str, url: str, goal: str):
+    loop = asyncio.get_event_loop()
+    try:
+        shared_mem = MissionManager.missions[mission_id]
+        
+        # --- Phase 1: Navigation & Extraction via Apify ---
+        shared_mem["live_logs"].append({
+            "timestamp": time.strftime("%H:%M:%S"),
+            "level": "ACTION",
+            "message": "Phase 1 : Activation du navigateur furtif Apify..."
+        })
+
+        # Utilisation de l'exécuteur pour ne pas bloquer l'Event Loop
+        dataset_id = await loop.run_in_executor(
+            executor, launch_apify_automation, url, goal
+        )
+
+        if dataset_id:
+            shared_mem["status"] = "analyzing"
+            shared_mem["live_logs"].append({
+                "timestamp": time.strftime("%H:%M:%S"),
+                "level": "INFO",
+                "message": "Données extraites. Analyse du ROI en cours..."
+            })
+
+            # --- Phase 2: Analyse LuxSoft (Arbitrage) ---
+            # Ici on récupère les données brutes (simulation ou appel API)
+            raw_results = [] 
+            deals = await loop.run_in_executor(executor, analyze_market_deals, raw_results)
+            
+            # --- Phase 3: Rapport Stratégique ---
+            report = await loop.run_in_executor(executor, generate_final_report, mission_id, deals)
+            
+            shared_mem["report"] = report.dict()
+            shared_mem["status"] = "completed"
+            shared_mem["live_logs"].append({
+                "timestamp": time.strftime("%H:%M:%S"),
+                "level": "SUCCESS",
+                "message": "Mission accomplie. Analyse LuxSoft terminée."
+            })
+        else:
+            shared_mem["status"] = "failed"
+            
+    except Exception as e:
+        print(f"💥 Erreur LuxSoft {mission_id}: {str(e)}")
+        if mission_id in MissionManager.missions:
+            MissionManager.missions[mission_id]["status"] = "error"
 
 @app.post("/run-mission")
 async def start_mission(request: MissionRequest, background_tasks: BackgroundTasks):
-    """
-    Point d'entrée principal. Crée une mission et lance l'orchestrateur en arrière-plan.
-    """
-    mission_id = str(uuid.uuid4())[:8] # ID court pour l'UI
-    
-    # Initialisation du contexte de mission dans le stockage partagé
-    missions_context[mission_id] = {
-        "status": "initializing",
-        "url": request.target_url,
-        "goal": request.mission_goal,
-        "live_logs": [],
+    mission_id = str(uuid.uuid4())[:8]
+    MissionManager.missions[mission_id] = {
+        "status": "running",
+        "live_logs": [{
+            "timestamp": time.strftime("%H:%M:%S"),
+            "level": "INFO",
+            "message": f"Uplink LuxSoft établi. Mission {mission_id}."
+        }],
         "report": None
     }
-    
-    log(f"Nouvelle mission reçue : {mission_id}", "ACTION", missions_context, mission_id)
-
-    # Lancement du Runner dans un thread séparé (pour éviter de bloquer l'Event Loop de FastAPI)
-    # On utilise BackgroundTasks pour la propreté FastAPI
-    background_tasks.add_task(
-        run_mission_orchestrator, 
-        mission_id, 
-        request.target_url, 
-        request.mission_goal, 
-        missions_context
-    )
-
-    return {"mission_id": mission_id, "status": "mission_started"}
+    background_tasks.add_task(execute_mission_task, mission_id, request.url, request.goal)
+    return {"mission_id": mission_id, "status": "initiated"}
 
 @app.get("/mission-status/{mission_id}")
-async def get_status(mission_id: str):
-    """
-    Endpoint de polling utilisé par ton JavaScript sur Cloudflare.
-    """
-    if mission_id not in missions_context:
-        raise HTTPException(status_code=404, detail="Mission non trouvée")
-    
-    # On renvoie tout le contexte (logs, status, rapport final si prêt)
-    return missions_context[mission_id]
-
-# --- DÉMARRAGE ---
-if __name__ == "__main__":
-    import uvicorn
-    # Le port est récupéré de l'env pour Render
-    import os
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+async def get_mission_status(mission_id: str):
+    if mission_id not in MissionManager.missions:
+        raise HTTPException(status_code=404, detail="Inconnu")
+    return MissionManager.missions[mission_id]
