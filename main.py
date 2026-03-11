@@ -41,7 +41,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.0_ZRH",
+        "version": "2.2.1_ZRH",
         "uptime_node": "Render Frankfurt"
     }
 
@@ -56,7 +56,6 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
         shared_mem = storage[mission_id]
         
         # --- Phase 1: Data Extraction via Apify ---
-        # launch_apify_automation now populates shared_mem["stream_url"] internally
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, storage, mission_id
         )
@@ -99,18 +98,19 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
 async def start_mission(
     request: MissionRequest, 
     background_tasks: BackgroundTasks, 
-    x_axiomos_auth: Optional[str] = Header(None)
+    x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Security handshake check
+    # Security handshake check using the aliased header
     if x_axiomos_auth != AXIOMOS_INTERNAL_AUTH:
+        print(f"AUTH_FAILURE: Received {x_axiomos_auth}") # Visible in Render Logs
         raise HTTPException(status_code=401, detail="Unauthorized Uplink")
 
     mission_id = str(uuid.uuid4())[:8]
     
-    # Initialize data structure with stream_url field for the UI
+    # Initialize data structure
     MissionManager.missions[mission_id] = {
         "status": "running",
-        "stream_url": None, # Will be updated dynamically by the agent
+        "stream_url": None, 
         "live_logs": [{
             "timestamp": time.strftime("%H:%M:%S"),
             "level": "INFO",
@@ -128,7 +128,10 @@ async def start_mission(
     }
 
 @app.get("/mission-status/{mission_id}")
-async def get_mission_status(mission_id: str, x_axiomos_auth: Optional[str] = Header(None)):
+async def get_mission_status(
+    mission_id: str, 
+    x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
+):
     # Security handshake check for polling
     if x_axiomos_auth != AXIOMOS_INTERNAL_AUTH:
          raise HTTPException(status_code=401, detail="Unauthorized Status Request")
