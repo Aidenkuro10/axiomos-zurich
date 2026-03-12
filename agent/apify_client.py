@@ -5,8 +5,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft utilisant Browser-Use (Apify Partner Tech).
-    Déclenche une navigation autonome avec capture d'écran à chaque étape.
+    Orchestrateur LuxSoft utilisant l'acteur Lexis Solutions (Browser-Use).
+    ID technique validé : lexis-solutions/browser-use-apify
     """
     token = get_apify_token()
     if not token:
@@ -15,23 +15,22 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
     client = ApifyClient(token)
     
-    # Configuration pour Browser-Use : IA autonome qui navigue et 'voit' la page
-    # Cet acteur est conçu pour le live-viewing via screenshots successifs.
+    # Configuration basée sur le schéma de l'acteur lexis-solutions
+    # 'instructions' est le paramètre clé pour cet agent autonome
     run_input = {
-        "instructions": f"Navigate to {url}. Focus on the market goal: {goal}. Examine listings carefully and take screenshots of the results.",
+        "instructions": f"Navigate to {url}. {goal}. Take screenshots of the listings you analyze to show your progress.",
         "proxyConfiguration": {"useApifyProxy": True},
-        "saveScreenshots": True,
-        "browserSize": "1280x720",
-        "maxSteps": 25,
-        "useVision": True  # Permet à l'IA de mieux 'comprendre' ce qu'elle voit
+        "useVision": True,        # Activé pour permettre à l'IA de 'voir' les Rolex
+        "renderVideo": False,     # On reste sur les screenshots pour la rapidité du flux
+        "maxSteps": 25            # Nombre d'actions maximum pour l'agent
     }
 
     try:
-        log(f"📡 Initiating Autonomous Agent (Browser-Use) for {url}...", "INFO", shared_storage, mission_id)
+        log(f"📡 Initiating Lexis Browser-Use Agent for {url}...", "INFO", shared_storage, mission_id)
         
-        # On cible l'acteur Browser-Use qui est le plus avancé pour la navigation visuelle
-        actor_call = client.actor("apify/browser-use-apify")
-        run = actor_call.start(run_input=run_input)
+        # Appel avec l'ID technique EXACT trouvé sur ton dashboard
+        # On utilise le start direct pour récupérer l'ID de run immédiatement
+        run = client.actor("lexis-solutions/browser-use-apify").start(run_input=run_input)
         
         if not run or "id" not in run:
             raise ValueError("Failed to retrieve Run ID from Apify.")
@@ -39,22 +38,21 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         run_id = run["id"]
         store_id = run.get("defaultKeyValueStoreId", "default")
 
-        # LOGIQUE VISUELLE : Browser-Use enregistre l'image de l'action en cours.
-        # Le nom 'last-action.png' est le standard pour cet acteur.
+        # URL de streaming : Cet acteur met à jour 'last-action.png' à chaque étape
         stream_url = f"https://api.apify.com/v2/key-value-stores/{store_id}/records/last-action.png?token={token}"
         
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = stream_url
-            # Log critique pour ton debug UI
-            log(f"🚀 Visual Uplink Established: {stream_url}", "ACTION", shared_storage, mission_id)
+            # Log de succès critique pour ton debug UI
+            log(f"🚀 Visual Uplink Synchronized: {stream_url}", "ACTION", shared_storage, mission_id)
 
-        log("🕵️ Agent is in control. Navigating luxury marketplace...", "INFO", shared_storage, mission_id)
+        log("🕵️ Agent Lexis is navigating. Synchronizing telemetry...", "INFO", shared_storage, mission_id)
         
-        # Attente bloquante de la fin du run
+        # Attente bloquante de la fin du run (timeout à 10 minutes)
         run_handle = client.run(run_id)
         final_run_result = run_handle.wait_for_finish(wait_secs=600)
         
-        # Délai de grâce pour la persistence finale
+        # Délai de grâce pour s'assurer que les dernières datas sont persistées
         time.sleep(5)
 
         if final_run_result and "defaultDatasetId" in final_run_result:
@@ -66,5 +64,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             return None
             
     except Exception as e:
+        # Capture de l'erreur d'ID ou de configuration
         log(f"💥 Internal System Error: {str(e)}", "ERROR", shared_storage, mission_id)
         return None
