@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from agent.apify_client import launch_apify_automation
 from services.data_analyzer import analyze_market_deals
 from services.report_builder import generate_final_report
-from config.secrets import AXIOMOS_INTERNAL_AUTH
+from config.secrets import AXIOMOS_INTERNAL_AUTH, get_apify_token
 from utils.database import init_db, save_mission, load_mission
 
 # Initialisation de la base de données au démarrage
@@ -56,7 +56,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.6.1_STARTER_STABLE",
+        "version": "2.7.0_LIVE_TELEMETRY_FIX",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -65,7 +65,7 @@ def read_root():
 async def proxy_live_image(mission_id: str):
     """
     Proxy Ultra-Résilient.
-    Force la récupération de l'image avec retries internes pour éviter l'écran noir.
+    Force la récupération de l'image avec bypass de cache pour le mode Playwright.
     """
     mission = load_mission(mission_id)
     if not mission:
@@ -81,21 +81,26 @@ async def proxy_live_image(mission_id: str):
         except:
             return Response(status_code=204)
 
-    # BOUCLE DE FORCAGE : On tente de récupérer l'image 3 fois si Apify est lent
-    for attempt in range(3):
-        try:
-            resp = requests.get(stream_url, timeout=5)
-            # On vérifie que le contenu est une vraie image (plus de 1000 octets)
-            if resp.status_code == 200 and len(resp.content) > 1000:
-                return Response(content=resp.content, media_type="image/png")
-            
-            # Si échec ou image vide, on attend un peu avant de réessayer
-            await asyncio.sleep(1.5)
-        except Exception as e:
-            print(f"Proxy Attempt {attempt} failed: {e}")
-            await asyncio.sleep(1)
+    # On force Apify à nous donner la version la plus fraîche du screenshot
+    # en ajoutant un paramètre de temps à l'URL source.
+    token = get_apify_token()
+    clean_url = stream_url.split('?')[0]
+    burst_url = f"{clean_url}?token={token}&disableRedirect=true&noCache={int(time.time())}"
 
-    # Fallback final sur l'image d'attente si l'image Apify est vraiment inaccessible
+    for attempt in range(2):
+        try:
+            resp = requests.get(burst_url, timeout=4)
+            if resp.status_code == 200 and len(resp.content) > 1000:
+                return Response(
+                    content=resp.content, 
+                    media_type="image/png",
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+                )
+            await asyncio.sleep(0.5)
+        except Exception:
+            await asyncio.sleep(0.5)
+
+    # Fallback vers l'image d'attente
     try:
         fallback_resp = requests.get(idle_url)
         return Response(content=fallback_resp.content, media_type="image/jpeg")
@@ -105,39 +110,46 @@ async def proxy_live_image(mission_id: str):
 async def execute_mission_task(mission_id: str, url: str, goal: str):
     """Pipeline d'orchestration unifié."""
     loop = asyncio.get_event_loop()
-    temp_storage = {mission_id: load_mission(mission_id)}
+    
+    # On initialise avec les données en DB
+    initial_state = load_mission(mission_id)
+    shared_ref = {mission_id: initial_state}
 
     try:
-        # Phase 1: Capture Visuelle et Extraction Unifiée (Agent Core)
+        # Phase 1: Capture Visuelle et Télémétrie Live
+        # L'apify_client doit maintenant utiliser une boucle pour updater shared_ref
         dataset_id = await loop.run_in_executor(
-            executor, launch_apify_automation, url, goal, temp_storage, mission_id
+            executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # Sauvegarde de l'URL de stream (maintenant fiable)
-        save_mission(mission_id, temp_storage[mission_id])
+        # On recharge l'état car les logs ont pu être mis à jour en DB par le logger
+        current_state = load_mission(mission_id)
 
         if dataset_id:
-            temp_storage[mission_id]["status"] = "analyzing"
-            save_mission(mission_id, temp_storage[mission_id])
+            current_state["status"] = "analyzing"
+            save_mission(mission_id, current_state)
 
             # Phase 2: Analyse
             deals = await loop.run_in_executor(
-                executor, analyze_market_deals, dataset_id, 0.10, temp_storage, mission_id
+                executor, analyze_market_deals, dataset_id, 0.10, shared_ref, mission_id
             )
             
             # Phase 3: Rapport
             report = await loop.run_in_executor(
-                executor, generate_final_report, mission_id, deals, temp_storage
+                executor, generate_final_report, mission_id, deals, shared_ref
             )
             
-            temp_storage[mission_id]["report"] = report.dict()
-            temp_storage[mission_id]["status"] = "completed"
+            # On recharge une dernière fois pour ne rien perdre des derniers logs
+            final_state = load_mission(mission_id)
+            final_state["report"] = report.dict()
+            final_state["status"] = "completed"
+            save_mission(mission_id, final_state)
             
-            save_mission(mission_id, temp_storage[mission_id])
-            print(f"--- SUCCESS: Mission {mission_id} completed and persisted ---")
+            print(f"--- SUCCESS: Mission {mission_id} finished ---")
         else:
-            temp_storage[mission_id]["status"] = "failed"
-            save_mission(mission_id, temp_storage[mission_id])
+            final_state = load_mission(mission_id)
+            final_state["status"] = "failed"
+            save_mission(mission_id, final_state)
             
     except Exception as e:
         print(f"💥 Critical Failure {mission_id}: {str(e)}")
@@ -163,7 +175,7 @@ async def start_mission(
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Mission started (Persistent Mode)."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Launching Agent Core."}],
         "report": None
     }
     save_mission(mission_id, initial_data)
