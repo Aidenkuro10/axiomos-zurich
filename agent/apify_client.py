@@ -1,6 +1,5 @@
 import time
 from apify_client import ApifyClient
-from apify_client._errors import ApifyApiError
 from config.secrets import get_apify_token
 from utils.logger import log
 
@@ -71,9 +70,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             log("❌ Apify Actor failed to return a valid dataset.", "ERROR", shared_storage, mission_id)
             return None
             
-    except ApifyApiError as api_err:
-        log(f"💥 Apify API Exception: {api_err.message}", "ERROR", shared_storage, mission_id)
-        return None
     except Exception as e:
+        # Capture générique pour éviter tout crash au démarrage du serveur
         log(f"❌ Internal System Error: {str(e)}", "ERROR", shared_storage, mission_id)
         return None
