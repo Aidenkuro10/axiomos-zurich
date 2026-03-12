@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, validator
 from typing import Optional, Any
+import re
 
 class MarketOpportunity(BaseModel):
     """
@@ -13,19 +14,33 @@ class MarketOpportunity(BaseModel):
     source_url: str = Field(..., description="Lien direct vers l'annonce")
     high_value_signal: bool = Field(default=False)
 
-    @validator('listed_price')
+    @validator('listed_price', pre=True)
     def clean_price(cls, v):
         """
-        Nettoyage automatique du prix : convertit "$12,400" ou "12'400 CHF" en float 12400.0
+        Nettoyage automatique du prix : convertit "$12,400", "12'400 CHF" ou "12 400" en float 12400.0
         """
-        if isinstance(v, str):
-            import re
-            # Supprime les espaces et séparateurs spécifiques pour ne garder que le format numérique
-            v_clean = v.replace(',', '').replace("'", "").replace(" ", "")
-            numbers = re.findall(r"[-+]?\d*\.\d+|\d+", v_clean)
-            return float(numbers[0]) if numbers else 0.0
-        
-        try:
-            return float(v)
-        except (TypeError, ValueError):
+        if v is None:
             return 0.0
+            
+        if isinstance(v, (int, float)):
+            return float(v)
+
+        if isinstance(v, str):
+            # 1. On vire les symboles monétaires et les espaces bizarres
+            # On remplace la virgule par rien (séparateur de milliers US) 
+            # et l'apostrophe par rien (séparateur CH)
+            v_clean = v.replace(',', '').replace("'", "").replace(" ", "").strip()
+            
+            # 2. Extraction du premier nombre (entier ou décimal)
+            numbers = re.findall(r"[-+]?\d*\.\d+|\d+", v_clean)
+            if numbers:
+                try:
+                    return float(numbers[0])
+                except ValueError:
+                    return 0.0
+        
+        return 0.0
+
+    class Config:
+        # Permet d'accepter les types arbitraires si nécessaire
+        arbitrary_types_allowed = True

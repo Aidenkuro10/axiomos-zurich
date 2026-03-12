@@ -8,7 +8,7 @@ from services.vector_db import save_opportunity_to_vector_db, ensure_collection_
 def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, mission_id=None):
     """
     Retrieves items from Apify dataset, implements robust field extraction 
-    from RAG markdown if standard fields are missing, and archives to Qdrant.
+    from RAG markdown, and FILTERS OUT items with 0 CHF listed price.
     """
     if not dataset_id:
         log("⚠️ No Dataset ID provided for analysis.", "ERROR", shared_storage, mission_id)
@@ -34,16 +34,15 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
         log(f"📊 Analyzing {len(raw_items)} listings with robust extraction...", "INFO", shared_storage, mission_id)
 
         processed_opportunities = []
-        
-        # 1. First pass: Extract and clean prices
         cleaned_data = []
+
+        # 1. First pass: Extract and clean prices
         for item in raw_items:
-            # Fallback logic for Price
             price = item.get('price')
             content = item.get('markdown', '') or item.get('text', '')
             
+            # Fallback logic for Price
             if not price or price == 0:
-                # Regex to find currency-like patterns (e.g., 12'400, 15000)
                 price_match = re.search(r"(\d{1,3}[\s']?\d{3})", content)
                 if price_match:
                     price = float(price_match.group(1).replace("'", "").replace(" ", ""))
@@ -51,7 +50,6 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
             # Fallback logic for Title/Model
             title = item.get('title') or item.get('metadata', {}).get('title')
             if (not title or "Unknown" in title) and content:
-                # Take the first line of markdown as a potential title
                 title = content.split('\n')[0][:60] if content else "Rolex Model"
 
             cleaned_data.append({
@@ -62,7 +60,7 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
                 "condition": item.get('condition') or "Pre-owned"
             })
 
-        # 2. Calculate market average
+        # 2. Calculate market average (only for items > 0)
         valid_prices = [d['price'] for d in cleaned_data if d['price'] > 0]
         avg_price = sum(valid_prices) / len(valid_prices) if valid_prices else 0
         
@@ -71,6 +69,10 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
 
         # 3. Final processing and Arbitrage detection
         for data in cleaned_data:
+            # --- CRITICAL FILTER: Ignore 0 CHF results for a clean report ---
+            if data['price'] <= 0:
+                continue
+
             try:
                 opp = MarketOpportunity(
                     model_name=data['title'],
@@ -80,7 +82,8 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
                     condition=data['condition']
                 )
                 
-                if opp.listed_price > 0 and avg_price > 0:
+                if avg_price > 0:
+                    # Detection logic based on threshold
                     if opp.listed_price < (avg_price * (1 - threshold)):
                         opp.high_value_signal = True
                         log(f"🔥 OPPORTUNITY DETECTED: {opp.model_name} at {opp.listed_price} CHF", "SUCCESS", shared_storage, mission_id)
@@ -90,7 +93,7 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
             except Exception:
                 continue
 
-        log(f"✅ Analysis complete: {len(processed_opportunities)} items processed.", "SUCCESS", shared_storage, mission_id)
+        log(f"✅ Analysis complete: {len(processed_opportunities)} valid items processed.", "SUCCESS", shared_storage, mission_id)
         return processed_opportunities
 
     except Exception as e:
