@@ -6,7 +6,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Drives the Apify RAG Web Browser Actor.
     Captures the run ID immediately to provide a live video feed URL.
-    Optimized for Live View rendering.
+    Optimized for Live View rendering and session stability.
     """
     token = get_apify_token()
     if not token:
@@ -16,16 +16,17 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     client = ApifyClient(token)
     
     # Configuration for LuxSoft Luxury Arbitrage
-    # Added viewport and screenshot settings to force video feed rendering
+    # Enhanced wait time to stabilize the browser-monitor session
     run_input = {
         "startUrls": [{"url": url}],
         "query": goal,
         "maxPagesPerCrawl": 3,
-        "dynamicContentWaitSecs": 5,
+        "dynamicContentWaitSecs": 10, # Increased to keep the stream alive
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
-        "screenshot": True 
+        "screenshot": True,
+        "useChrome": True # Ensures a more standard rendering for the live view
     }
 
     try:
@@ -36,7 +37,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         run_id = run["id"]
 
         # Generate the Live View URL for the Frontend Iframe
-        # Using the standard browser-monitor endpoint with authentication token
+        # Format used for real-time browser monitoring
         stream_url = f"https://api.apify.com/v2/browser-monitor/{run_id}/live-view?token={token}"
         
         # Inject the stream URL into shared storage for UI synchronization
@@ -47,7 +48,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         # Now wait for the actor to finish and get the final result
         log(f"🕵️ Agent is navigating. Extraction in progress...", "INFO", shared_storage, mission_id)
         
-        # Increased timeout slightly for deep rendering
+        # Increased timeout for deep rendering and stable extraction
         final_run_result = client.run(run_id).wait_for_finish(wait_secs=300)
         
         if final_run_result and "defaultDatasetId" in final_run_result:
