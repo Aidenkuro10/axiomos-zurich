@@ -14,16 +14,15 @@ from services.report_builder import generate_final_report
 from config.secrets import AXIOMOS_INTERNAL_AUTH
 
 class MissionManager:
-    """Centralized in-memory storage for LuxSoft polling sessions."""
+    """Stockage centralisé en mémoire pour les sessions LuxSoft."""
     missions: Dict[str, Dict[str, Any]] = {}
 
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 
-# ThreadPoolExecutor handles blocking I/O calls (Apify/Requests)
+# ThreadPoolExecutor gère les appels I/O bloquants (Apify/Requests)
 executor = ThreadPoolExecutor(max_workers=10)
 
-# --- CORS CONFIGURATION ULTRA-PERMISSIVE ---
-# On autorise explicitement axiomos.ai pour éviter les blocages de "Preflight"
+# --- CONFIGURATION CORS ULTRA-PERMISSIVE ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://axiomos.ai", "http://axiomos.ai", "*"],
@@ -40,25 +39,25 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    """Health check endpoint for Render monitoring."""
+    """Endpoint de santé pour le monitoring Render."""
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.4_ZRH_SURVIVAL",
+        "version": "2.2.5_ZRH_AUTONOMOUS",
         "uptime_node": "Render Frankfurt"
     }
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
     """
-    Mission Orchestrator. 
-    Sequentially executes extraction, arbitrage analysis, and report generation.
+    Orchestrateur de Mission. 
+    Exécute séquentiellement l'extraction (Browser-Use), l'analyse et le rapport.
     """
     loop = asyncio.get_event_loop()
     try:
         storage = MissionManager.missions
         shared_mem = storage[mission_id]
         
-        # --- Phase 1: Data Extraction via Apify ---
+        # --- Phase 1: Extraction via Apify (Browser-Use) ---
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, storage, mission_id
         )
@@ -66,12 +65,12 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
         if dataset_id:
             shared_mem["status"] = "analyzing"
             
-            # --- Phase 2: LuxSoft Analysis ---
+            # --- Phase 2: Analyse LuxSoft ---
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, storage, mission_id
             )
             
-            # --- Phase 3: Strategic Reporting ---
+            # --- Phase 3: Rapport Stratégique ---
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, storage
             )
@@ -89,11 +88,11 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             shared_mem["live_logs"].append({
                 "timestamp": time.strftime("%H:%M:%S"),
                 "level": "ERROR",
-                "message": "❌ Mission failed: Extraction returned an empty dataset."
+                "message": "❌ Mission failed: Agent returned an empty dataset."
             })
         
         # --- PHASE 4: SURVIVAL DELAY ---
-        # Keeps mission data in memory for the frontend to pull results
+        # Garde les données en mémoire pour permettre au front de finir le polling
         print(f"DEBUG: Mission {mission_id} enters grace period.")
         await asyncio.sleep(60) 
         print(f"DEBUG: Mission {mission_id} task finalized.")
@@ -109,7 +108,7 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # --- AUTHENTICATION CLEANUP ---
+    # --- NETTOYAGE AUTHENTICATION ---
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -118,7 +117,7 @@ async def start_mission(
 
     mission_id = str(uuid.uuid4())[:8]
     
-    # Initialize data structure
+    # Initialisation de la structure de données
     MissionManager.missions[mission_id] = {
         "status": "running",
         "stream_url": None, 
@@ -143,7 +142,7 @@ async def get_mission_status(
     mission_id: str, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # --- AUTHENTICATION CLEANUP ---
+    # --- NETTOYAGE AUTHENTICATION ---
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
