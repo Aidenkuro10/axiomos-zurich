@@ -5,9 +5,10 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version DUAL-CORE (Optimisée pour Screenshot Generator).
-    Utilise 'apify/screenshot-url' pour le visuel immédiat.
-    Utilise 'apify/rag-web-browser' pour l'extraction des données.
+    Orchestrateur LuxSoft - Version DUAL-CORE OPTIMISÉE (Plan Gratuit).
+    Répartition de la RAM (Total < 8GB) : 
+    - Visualiseur : 512MB
+    - Extracteur : 1024MB
     """
     token = get_apify_token()
     if not token:
@@ -20,32 +21,31 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         log(f"Uplink Initialized. Deploying Agents for {url}...", "INFO", shared_storage, mission_id)
         
         # ---------------------------------------------------------
-        # 1. LANCEMENT DU VISUALISEUR (Screenshot Generator)
+        # 1. LANCEMENT DU VISUALISEUR (Basse consommation)
         # ---------------------------------------------------------
-        # Cet Actor est ultra-rapide pour générer un aperçu réel.
+        # On alloue seulement 512MB pour ne pas saturer ton quota de 8GB
         visual_run = client.actor("apify/screenshot-url").start(
             run_input={
                 "url": str(url),
                 "waitUntil": "networkidle2",
                 "width": 1280,
                 "height": 720,
-                "delay": 2000 # On laisse 2s pour que le contenu s'affiche
-            }
+                "delay": 2000 
+            },
+            memory_mbytes=512
         )
         
         visual_store_id = visual_run.get("defaultKeyValueStoreId")
-        # Le Screenshot Generator enregistre l'image finale sous le nom 'OUTPUT'
         stream_url = f"https://api.apify.com/v2/key-value-stores/{visual_store_id}/records/OUTPUT?token={token}&disableRedirect=true"
         
-        # Injection immédiate pour l'interface
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = stream_url
-            log(f"🚀 VISUAL FEED ONLINE", "SUCCESS", shared_storage, mission_id)
+            log(f"🚀 VISUAL FEED ONLINE (512MB)", "SUCCESS", shared_storage, mission_id)
 
         # ---------------------------------------------------------
-        # 2. LANCEMENT DE L'AGENT DATA (RAG Web Browser)
+        # 2. LANCEMENT DE L'AGENT DATA (Consommation Maîtrisée)
         # ---------------------------------------------------------
-        log("Deploying Data Specialist for analysis...", "ACTION", shared_storage, mission_id)
+        log("Deploying Data Specialist (1024MB)...", "ACTION", shared_storage, mission_id)
         data_run = client.actor("apify/rag-web-browser").start(
             run_input={
                 "startUrls": [{"url": str(url)}],
@@ -53,21 +53,20 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 "maxPagesPerCrawl": 1,
                 "scrapingTool": "browser-playwright",
                 "proxyConfiguration": {"useApifyProxy": True}
-            }
+            },
+            memory_mbytes=1024
         )
         
         data_run_id = data_run["id"]
 
         # ---------------------------------------------------------
-        # 3. BOUCLE DE TÉLÉMÉTRIE (Logs synchronisés)
+        # 3. BOUCLE DE TÉLÉMÉTRIE
         # ---------------------------------------------------------
         last_log_offset = 0
         while True:
-            # On surveille l'agent DATA pour l'analyse
             details = client.run(data_run_id).get()
             status = details.get("status")
             
-            # Récupération des logs de l'agent DATA pour ton dashboard
             full_log = client.log(data_run_id).get()
             if full_log:
                 new_logs = full_log[last_log_offset:]
