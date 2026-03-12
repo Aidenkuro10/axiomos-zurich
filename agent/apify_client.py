@@ -10,12 +10,13 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     token = get_apify_token()
     if not token:
-        log("❌ Apify Token missing in secrets", "ERROR", shared_storage, mission_id)
+        log("Apify Token missing in secrets", "ERROR", shared_storage, mission_id)
         return None
 
     client = ApifyClient(token)
     
     # Configuration Robuste - Typage strict pour le schéma Apify
+    # Note : On utilise saveScreenshot pour forcer la génération du fichier image
     run_input = {
         "startUrls": [{"url": str(url)}],
         "query": str(goal),
@@ -24,7 +25,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
-        "saveScreenshot": True,  # Indispensable pour le Stop-Motion
+        "saveScreenshot": True,  
         "useChrome": True,
         "pageLoadTimeoutSecs": 60,
         "maxConcurrency": 1,
@@ -33,7 +34,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     }
 
     try:
-        log(f"📡 Initiating Apify handshake for {url}...", "INFO", shared_storage, mission_id)
+        log(f"Initiating Apify handshake for {url}...", "INFO", shared_storage, mission_id)
         
         # Initialisation de l'Actor
         actor_call = client.actor("apify/rag-web-browser")
@@ -45,15 +46,15 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         run_id = run["id"]
 
         # Construction de l'URL du Key-Value Store pour l'image Stop-Motion
-        # Cette URL est immuable durant le run et sera rafraîchie par le cache-buster du frontend
+        # Ce lien pointe vers l'enregistrement 'screenshot.png' créé par saveScreenshot
         stream_url = f"https://api.apify.com/v2/runs/{run_id}/key-value-store/records/screenshot.png?token={token}"
         
         if shared_storage and mission_id in shared_storage:
             # Injection immédiate pour le polling du frontend
             shared_storage[mission_id]["stream_url"] = stream_url
-            log(f"🚀 Visual uplink synchronized. Agent ID: {run_id}", "ACTION", shared_storage, mission_id)
+            log(f"Visual uplink synchronized. Agent ID: {run_id}", "ACTION", shared_storage, mission_id)
 
-        log("🕵️ Agent is navigating and capturing visual evidence...", "INFO", shared_storage, mission_id)
+        log("Agent is navigating and capturing visual evidence...", "INFO", shared_storage, mission_id)
         
         # Blocage contrôlé avec timeout étendu pour la navigation
         run_handle = client.run(run_id)
@@ -64,13 +65,13 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
         if final_run_result and "defaultDatasetId" in final_run_result:
             dataset_id = final_run_result.get("defaultDatasetId")
-            log(f"✅ Apify scan complete (Dataset ID: {dataset_id})", "SUCCESS", shared_storage, mission_id)
+            log(f"Apify scan complete (Dataset ID: {dataset_id})", "SUCCESS", shared_storage, mission_id)
             return dataset_id
         else:
-            log("❌ Apify Actor failed to return a valid dataset.", "ERROR", shared_storage, mission_id)
+            log("Apify Actor failed to return a valid dataset.", "ERROR", shared_storage, mission_id)
             return None
             
     except Exception as e:
         # Capture générique pour éviter tout crash au démarrage du serveur
-        log(f"❌ Internal System Error: {str(e)}", "ERROR", shared_storage, mission_id)
+        log(f"Internal System Error: {str(e)}", "ERROR", shared_storage, mission_id)
         return None
