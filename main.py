@@ -45,7 +45,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.4.0_DOUBLE_UPLINK",
+        "version": "2.4.1_DOUBLE_UPLINK_STABLE",
         "active_missions": list(MissionManager.missions.keys())
     }
 
@@ -53,25 +53,29 @@ def read_root():
 async def proxy_live_image(mission_id: str):
     """
     Relais Serveur -> Client avec Fallback Visuel.
-    Supporte la transition entre le screenshot rapide et le screenshot final.
+    Sert l'image de l'agent en contournant les blocages CORS/403 d'Apify.
     """
-    # Log de diagnostic RAM pour vérifier la présence de la session
     if mission_id not in MissionManager.missions:
-        print(f"DEBUG PROXY: Request for {mission_id} - NOT FOUND")
-        return Response(status_code=404, content="Mission expired")
+        return Response(status_code=404, content="Mission expired or ID invalid")
     
     stream_url = MissionManager.missions[mission_id].get("stream_url")
     if not stream_url:
-        return Response(status_code=204)
+        # Uplink non établi : on renvoie l'image d'attente directement
+        idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
+        try:
+            idle_resp = requests.get(idle_url, timeout=5)
+            return Response(content=idle_resp.content, media_type="image/jpeg")
+        except:
+            return Response(status_code=204)
 
     try:
-        # Tentative de récupération du visuel Apify
+        # Tentative de récupération du visuel sur le store Apify
         resp = requests.get(stream_url, timeout=5)
         
         if resp.status_code == 200:
             return Response(content=resp.content, media_type="image/png")
         
-        # Fallback si l'image n'est pas encore prête sur le store d'Apify
+        # Si Apify renvoie 404 (store pas encore prêt), on sert le Fallback Premium
         elif resp.status_code == 404:
             idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
             idle_resp = requests.get(idle_url)
@@ -83,13 +87,14 @@ async def proxy_live_image(mission_id: str):
     return Response(status_code=404)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline LuxSoft avec exécution de l'automatisation et analyse."""
+    """Pipeline d'orchestration Double Uplink."""
     loop = asyncio.get_event_loop()
     try:
         storage = MissionManager.missions
         shared_mem = storage[mission_id]
         
-        # Phase 1: Automatisation (Double Uplink : Screenshot rapide + RAG Analysis)
+        # Phase 1: Automatisation (Screenshot rapide + RAG Analysis)
+        # La fonction launch_apify_automation met à jour stream_url en temps réel
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, storage, mission_id
         )
@@ -100,7 +105,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, storage, mission_id
             )
-            # Phase 3: Construction du rapport stratégique
+            # Phase 3: Construction du rapport final
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, storage
             )
@@ -109,9 +114,9 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
         else:
             shared_mem["status"] = "failed"
         
-        # --- PHASE DE PERSISTENCE ---
-        # On maintient les données en RAM pour le polling post-mission (1 heure)
-        print(f"MISSION {mission_id} PERSISTENCE ENABLED")
+        # --- PERSISTENCE DE SÉCURITÉ ---
+        # Garde la mission en RAM pendant 1 heure pour éviter les 404
+        print(f"MISSION {mission_id} PERSISTENCE ENABLED (1H)")
         await asyncio.sleep(3600) 
             
     except Exception as e:
@@ -125,7 +130,7 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Validation de l'authentification interne
+    # Validation Auth
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -155,7 +160,7 @@ async def get_mission_status(
          raise HTTPException(status_code=401, detail="Unauthorized")
 
     if mission_id not in MissionManager.missions:
-        raise HTTPException(status_code=404, detail="Mission not found")
+        raise HTTPException(status_code=404, detail="Mission ID not found in memory")
         
     return MissionManager.missions[mission_id]
 
