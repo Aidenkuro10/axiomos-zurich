@@ -19,7 +19,7 @@ class MissionManager:
 
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 
-# ThreadPoolExecutor handles blocking I/O calls (Apify/Requests) without freezing the Event Loop
+# ThreadPoolExecutor handles blocking I/O calls (Apify/Requests)
 executor = ThreadPoolExecutor(max_workers=10)
 
 # --- CORS CONFIGURATION ---
@@ -41,7 +41,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.2_ZRH",
+        "version": "2.2.3_ZRH_SURVIVAL",
         "uptime_node": "Render Frankfurt"
     }
 
@@ -49,6 +49,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
     """
     Mission Orchestrator. 
     Sequentially executes extraction, arbitrage analysis, and report generation.
+    Added a survival delay to prevent Render from recycling the process prematurely.
     """
     loop = asyncio.get_event_loop()
     try:
@@ -88,6 +89,13 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
                 "level": "ERROR",
                 "message": "❌ Mission failed: Extraction returned an empty dataset."
             })
+        
+        # --- PHASE 4: SURVIVAL DELAY ---
+        # Keeps the background task 'active' for Render, 
+        # allowing the frontend to poll the final result before memory wipe.
+        print(f"DEBUG: Mission {mission_id} enters grace period.")
+        await asyncio.sleep(60) 
+        print(f"DEBUG: Mission {mission_id} task finalized.")
             
     except Exception as e:
         print(f"💥 Critical LuxSoft Error {mission_id}: {str(e)}")
@@ -100,13 +108,11 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # --- ROBUST AUTHENTICATION SANITIZER ---
-    # Removes spaces, quotes, and newlines that often sneak into Render env vars
+    # --- AUTHENTICATION ---
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
     if received != expected:
-        print(f"AUTH_FAILURE: Received [{received}] but internal config expects [{expected}]")
         raise HTTPException(status_code=401, detail="Unauthorized Uplink")
 
     mission_id = str(uuid.uuid4())[:8]
@@ -144,4 +150,5 @@ async def get_mission_status(
 
     if mission_id not in MissionManager.missions:
         raise HTTPException(status_code=404, detail="Mission ID not found")
+        
     return MissionManager.missions[mission_id]
