@@ -16,19 +16,19 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
     client = ApifyClient(token)
     
-    # Configuration de combat pour forcer le rendu et stabiliser l'image
+    # Configuration optimisée : on force l'agent à ralentir pour la capture
     run_input = {
         "startUrls": [{"url": str(url)}],
         "query": str(goal),
         "maxPagesPerCrawl": 5, 
-        "dynamicContentWaitSecs": 10, # Force l'agent à "contempler" la page (essentiel pour le screenshot)
+        "dynamicContentWaitSecs": 15, # Augmenté pour garantir que le JS a fini de rendre la page
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
         "saveScreenshot": True,
         "useChrome": True,
         "pageLoadTimeoutSecs": 60,
-        "waitUntil": "networkidle2" # Attend que le réseau soit calme (assets chargés)
+        "waitUntil": "networkidle2"
     }
 
     try:
@@ -41,10 +41,9 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             raise ValueError("No Run ID received from Apify.")
 
         run_id = run["id"]
-        # Récupération du Store ID spécifique à ce run précis
         store_id = run.get("defaultKeyValueStoreId")
 
-        # URL de streaming avec paramètre de désactivation des redirections pour le polling
+        # URL de streaming directe avec suppression des redirections
         stream_url = f"https://api.apify.com/v2/key-value-stores/{store_id}/records/screenshot.png?token={token}&disableRedirect=true"
         
         if shared_storage and mission_id in shared_storage:
@@ -53,11 +52,15 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
         log("Agent is navigating and capturing visual evidence...", "INFO", shared_storage, mission_id)
         
+        # --- FIX DE TIMING : On laisse l'image se générer AVANT de surveiller la fin ---
+        # Sans ce sleep, l'acteur finit son extraction et coupe le navigateur trop vite
+        time.sleep(15) 
+
         # Attente bloquante du résultat final
         final_run_result = client.run(run_id).wait_for_finish(wait_secs=500)
         
-        # Délai de grâce crucial pour laisser Apify finaliser l'écriture du screenshot sur le disque
-        time.sleep(10)
+        # Délai de grâce final pour la persistance disque d'Apify
+        time.sleep(5)
 
         if final_run_result and "defaultDatasetId" in final_run_result:
             dataset_id = final_run_result.get("defaultDatasetId")

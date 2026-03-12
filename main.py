@@ -45,49 +45,53 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.3.0_DIAGNOSTIC",
+        "version": "2.3.1_FINAL_FIX",
         "active_missions": list(MissionManager.missions.keys())
     }
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    Relais Serveur -> Client avec Diagnostic.
+    Relais Serveur -> Client avec Fallback Visuel.
     """
-    # LOG DE DIAGNOSTIC : On liste ce que le serveur voit en RAM
+    # Log de diagnostic RAM
     print(f"DEBUG PROXY: Request for {mission_id}. RAM State: {list(MissionManager.missions.keys())}")
 
     if mission_id not in MissionManager.missions:
-        return Response(status_code=404, content=f"Mission {mission_id} not found in RAM")
+        return Response(status_code=404, content=f"Mission {mission_id} expired")
     
     stream_url = MissionManager.missions[mission_id].get("stream_url")
     if not stream_url:
-        return Response(status_code=204) # Toujours en vie, mais pas d'URL
+        return Response(status_code=204)
 
     try:
+        # On tente de récupérer le screenshot réel
         resp = requests.get(stream_url, timeout=5)
+        
         if resp.status_code == 200:
             return Response(content=resp.content, media_type="image/png")
         
-        # Si Apify ne répond pas encore, on renvoie un pixel pour garder le flux actif
+        # SI APIFY N'EST PAS PRÊT (404) : 
+        # On sert l'image d'attente LuxSoft au lieu d'un écran noir
         elif resp.status_code == 404:
-            print(f"DEBUG PROXY: Apify store not ready for {mission_id}")
-            empty_pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\x2e\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
-            return Response(content=empty_pixel, media_type="image/png")
+            print(f"DEBUG PROXY: Apify store still warming up for {mission_id}")
+            idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
+            idle_resp = requests.get(idle_url)
+            return Response(content=idle_resp.content, media_type="image/jpeg")
             
     except Exception as e:
-        print(f"DEBUG PROXY: Error - {str(e)}")
+        print(f"DEBUG PROXY: Critical Error - {str(e)}")
     
     return Response(status_code=404)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline LuxSoft avec persistence forcée."""
+    """Pipeline LuxSoft avec persistence étendue."""
     loop = asyncio.get_event_loop()
     try:
         storage = MissionManager.missions
         shared_mem = storage[mission_id]
         
-        # Phase 1: Navigation
+        # Phase 1: Navigation et Capture (L'apify_client gère le sleep interne)
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, storage, mission_id
         )
@@ -105,9 +109,9 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
         else:
             shared_mem["status"] = "failed"
         
-        # --- PHASE DE PERSISTENCE FORCÉE (1 HEURE) ---
-        # On ne supprime plus la mission pour permettre le debug manuel
-        print(f"MISSION {mission_id} SLEEPING FOR 1 HOUR TO PRESERVE DATA")
+        # --- PHASE DE PERSISTENCE ---
+        # On garde les données 1 heure pour éviter les 404 lors du débriefing
+        print(f"MISSION {mission_id} COMPLETED. DATA PERSISTENCE ACTIVE.")
         await asyncio.sleep(3600) 
             
     except Exception as e:
