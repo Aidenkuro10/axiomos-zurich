@@ -6,7 +6,7 @@ from utils.logger import log
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Orchestrateur LuxSoft - Version UNIFIÉE, LIVE & ASYNCHRONE.
-    Correction : Utilisation de la valeur exacte 'browser-playwright'.
+    Étape finale : Activation du mode Headed pour forcer le rendu visuel.
     """
     token = get_apify_token()
     if not token:
@@ -19,7 +19,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         log(f"Initiating Unified Strategic Mission for {url}...", "INFO", shared_storage, mission_id)
         log("Step 1/1: Deploying Agent Core (Playwright Engine)...", "ACTION", shared_storage, mission_id)
         
-        # Lancement asynchrone
+        # Lancement asynchrone avec forçage du rendu
         run = client.actor("apify/rag-web-browser").start(
             run_input={
                 "startUrls": [{"url": str(url)}],
@@ -27,7 +27,9 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 "maxPagesPerCrawl": 1, 
                 "saveScreenshot": True,
                 "useChrome": True,
-                "scrapingTool": "browser-playwright", # VALEUR CORRIGÉE ICI
+                "scrapingTool": "browser-playwright",
+                "headless": False,            # FORCE le navigateur à être "visible"
+                "forceScreenshots": True,      # FORCE la capture immédiate
                 "proxyConfiguration": {"useApifyProxy": True}
             },
             memory_mbytes=2048 
@@ -36,14 +38,14 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         run_id = run["id"]
         store_id = run.get("defaultKeyValueStoreId")
         
-        # URL du screenshot
+        # URL du screenshot pointant vers le Key-Value Store
         stream_url = f"https://api.apify.com/v2/key-value-stores/{store_id}/records/screenshot.png?token={token}&disableRedirect=true"
         
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = stream_url
             log(f"🚀 VISUAL UPLINK ESTABLISHED", "SUCCESS", shared_storage, mission_id)
 
-        # BOUCLE DE TÉLÉMÉTRIE
+        # BOUCLE DE TÉLÉMÉTRIE (Logs en direct)
         last_log_offset = 0
         while True:
             current_run = client.run(run_id).get()
