@@ -6,7 +6,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Drives the Apify RAG Web Browser Actor.
     Captures the run ID immediately to provide a live video feed URL.
-    Optimized for 'Showmanship Mode': slower, deeper navigation for live demos.
+    Optimized for 'Showmanship Mode': slower, sequential navigation for live demos.
     """
     token = get_apify_token()
     if not token:
@@ -16,19 +16,22 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     client = ApifyClient(token)
     
     # Configuration for LuxSoft Luxury Arbitrage - Demo Optimized
+    # We limit concurrency to 1 to ensure a single, visible path of navigation
     run_input = {
         "startUrls": [{"url": url}],
         "query": goal,
-        "maxPagesPerCrawl": 5,           # Deeper crawl to show navigation logic
-        "dynamicContentWaitSecs": 25,    # Extended pause to stabilize live feed
+        "maxPagesPerCrawl": 5,           # Deeper crawl for longer visual presence
+        "dynamicContentWaitSecs": 30,    # Increased significantly to stabilize feed
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
         "screenshot": True,
         "useChrome": True,
-        # Force a more deliberate agent behavior
+        # FORCE SLOW MODE
         "pageLoadTimeoutSecs": 60,
-        "waitForSelector": ".article-item, .listing-item", # Ensures watches are rendered before moving
+        "maxConcurrency": 1,             # Sequential navigation only
+        "initialConcurrency": 1,
+        "waitForSelector": ".article-item, .listing-item", # Wait for render
     }
 
     try:
@@ -50,7 +53,8 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         log(f"🕵️ Agent is navigating and cross-referencing data...", "INFO", shared_storage, mission_id)
         
         # Wait for the actor to finish its deliberate process
-        final_run_result = client.run(run_id).wait_for_finish(wait_secs=400)
+        # Using a higher wait_secs to allow for the intentional slowdown
+        final_run_result = client.run(run_id).wait_for_finish(wait_secs=500)
         
         if final_run_result and "defaultDatasetId" in final_run_result:
             dataset_id = final_run_result.get("defaultDatasetId")
