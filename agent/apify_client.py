@@ -6,8 +6,8 @@ from utils.logger import log
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Drives the Apify RAG Web Browser Actor.
-    Captures the run ID immediately to provide a live video feed URL.
-    Optimized for 'Showmanship Mode': forced delay to stabilize visual uplink.
+    Optimized for 'Stop-Motion Video Mode': forces periodic screenshots
+    and provides a direct link to the Key-Value Store record.
     """
     token = get_apify_token()
     if not token:
@@ -16,23 +16,22 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
     client = ApifyClient(token)
     
-    # Configuration for LuxSoft Luxury Arbitrage - Demo Optimized
+    # Configuration for LuxSoft Luxury Arbitrage - Stop-Motion Optimized
     run_input = {
         "startUrls": [{"url": url}],
         "query": goal,
-        "maxPagesPerCrawl": 5,           
-        "dynamicContentWaitSecs": 30,    
+        "maxPagesPerCrawl": 3,           
+        "dynamicContentWaitSecs": 10,    
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
-        "screenshot": True,
+        "saveScreenshot": True, # FORCE l'agent à prendre des photos
         "useChrome": True,
         "pageLoadTimeoutSecs": 60,
         "maxConcurrency": 1,             
         "initialConcurrency": 1,
         "waitForSelector": ".article-item, .listing-item",
-        # CRITICAL: Keeps the browser open after crawling to avoid 404 on live-view
-        "postCrawlingWaitSecs": 45       
+        "postCrawlingWaitSecs": 5       
     }
 
     try:
@@ -42,21 +41,21 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         run = client.actor("apify/rag-web-browser").start(run_input=run_input)
         run_id = run["id"]
 
-        # Generate the Live View URL
-        stream_url = f"https://api.apify.com/v2/browser-monitor/{run_id}/live-view?token={token}"
+        # NOUVELLE LOGIQUE : On pointe vers le Key-Value Store pour l'image
+        # Ce fichier 'screenshot.png' est mis à jour par l'acteur durant son run.
+        stream_url = f"https://api.apify.com/v2/runs/{run_id}/key-value-store/records/screenshot.png?token={token}"
         
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = stream_url
-            log(f"📡 Live feed synchronized. Agent ID: {run_id}", "ACTION", shared_storage, mission_id)
+            log(f"🚀 Visual uplink synchronized. Agent ID: {run_id}", "ACTION", shared_storage, mission_id)
 
-        log(f"🕵️ Agent is navigating and cross-referencing data...", "INFO", shared_storage, mission_id)
+        log(f"🕵️ Agent is navigating and capturing visual evidence...", "INFO", shared_storage, mission_id)
         
         # Wait for the actor to finish
         final_run_result = client.run(run_id).wait_for_finish(wait_secs=500)
         
-        # Artificial delay before releasing the "running" state to let the UI 
-        # catch the last frames and prevent immediate 404s
-        time.sleep(10)
+        # Petit délai pour s'assurer que le dernier screenshot est bien uploadé
+        time.sleep(5)
 
         if final_run_result and "defaultDatasetId" in final_run_result:
             dataset_id = final_run_result.get("defaultDatasetId")
