@@ -3,7 +3,7 @@ import time
 import asyncio
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -22,12 +22,13 @@ app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 # ThreadPoolExecutor handles blocking I/O calls (Apify/Requests)
 executor = ThreadPoolExecutor(max_workers=10)
 
-# --- CORS CONFIGURATION ---
+# --- CORS CONFIGURATION ULTRA-PERMISSIVE ---
+# On autorise explicitement axiomos.ai pour éviter les blocages de "Preflight"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://axiomos.ai", "http://axiomos.ai", "*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
@@ -36,12 +37,14 @@ class MissionRequest(BaseModel):
     url: str
     goal: str
 
+@app.head("/")
 @app.get("/")
 def read_root():
+    """Health check endpoint for Render monitoring."""
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.3_ZRH_SURVIVAL",
+        "version": "2.2.4_ZRH_SURVIVAL",
         "uptime_node": "Render Frankfurt"
     }
 
@@ -49,7 +52,6 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
     """
     Mission Orchestrator. 
     Sequentially executes extraction, arbitrage analysis, and report generation.
-    Added a survival delay to prevent Render from recycling the process prematurely.
     """
     loop = asyncio.get_event_loop()
     try:
@@ -91,8 +93,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             })
         
         # --- PHASE 4: SURVIVAL DELAY ---
-        # Keeps the background task 'active' for Render, 
-        # allowing the frontend to poll the final result before memory wipe.
+        # Keeps mission data in memory for the frontend to pull results
         print(f"DEBUG: Mission {mission_id} enters grace period.")
         await asyncio.sleep(60) 
         print(f"DEBUG: Mission {mission_id} task finalized.")
@@ -108,7 +109,7 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # --- AUTHENTICATION ---
+    # --- AUTHENTICATION CLEANUP ---
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -142,6 +143,7 @@ async def get_mission_status(
     mission_id: str, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
+    # --- AUTHENTICATION CLEANUP ---
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
