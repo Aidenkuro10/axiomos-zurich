@@ -8,27 +8,31 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version IMGBB BYPASS.
+    Orchestrateur LuxSoft - Version IMGBB BYPASS + DIAGNOSTIC.
     Capture l'image, l'upload sur ImgBB et fournit une URL publique directe.
-    Élimine définitivement les erreurs 403 et les écrans noirs de Render/Apify.
     """
     token = get_apify_token()
     if not token:
-        log("Apify Token missing", "ERROR", shared_storage, mission_id)
+        log("Apify Token missing in secrets", "ERROR", shared_storage, mission_id)
         return None
 
     client = ApifyClient(token)
+    
+    # RÉCUPÉRATION ET DIAGNOSTIC DE LA CLÉ IMGBB
     imgbb_key = os.environ.get("IMGBB_API_KEY")
+    if not imgbb_key:
+        log("❌ IMGBB_API_KEY missing from Render Environment", "ERROR", shared_storage, mission_id)
+    else:
+        log(f"🔎 Key detected (Prefix: {imgbb_key[:4]}...)", "INFO", shared_storage, mission_id)
 
     try:
-        log(f"Initiating strategic mission for {url}...", "INFO", shared_storage, mission_id)
+        log(f"Initiating visual capture for mission {mission_id}...", "INFO", shared_storage, mission_id)
         
         # ---------------------------------------------------------
-        # 1. CAPTURE VISUELLE (BLOQUANTE)
+        # 1. CAPTURE VISUELLE (BLOQUANTE VIA .CALL)
         # ---------------------------------------------------------
         log("Capturing live viewport...", "ACTION", shared_storage, mission_id)
         
-        # On utilise .call() pour attendre la fin réelle de la capture
         visual_run = client.actor("apify/screenshot-url").call(
             run_input={
                 "url": str(url),
@@ -40,14 +44,20 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             memory_mbytes=1024
         )
         
+        # Petit délai de sécurité pour laisser le temps au stockage Apify de se stabiliser
+        time.sleep(2)
+        
         # ---------------------------------------------------------
-        # 2. UPLOAD VERS IMGBB (BYPASS STORAGE)
+        # 2. RÉCUPÉRATION ET UPLOAD VERS IMGBB
         # ---------------------------------------------------------
         v_store_id = visual_run.get("defaultKeyValueStoreId")
-        record = client.key_value_store(v_store_id).get_record(f"view_{mission_id}")
+        record_key = f"view_{mission_id}"
+        
+        log(f"Fetching record {record_key} from store {v_store_id}...", "INFO", shared_storage, mission_id)
+        record = client.key_value_store(v_store_id).get_record(record_key)
         
         if record and imgbb_key:
-            log("Uploading viewport to global CDN...", "ACTION", shared_storage, mission_id)
+            log("Record found. Starting CDN upload...", "ACTION", shared_storage, mission_id)
             img_b64 = base64.b64encode(record['value']).decode('utf-8')
             
             res = requests.post(
@@ -60,11 +70,14 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 public_url = res.json()['data']['url']
                 if shared_storage and mission_id in shared_storage:
                     shared_storage[mission_id]["stream_url"] = public_url
-                    log(f"🚀 VISUAL UPLINK SECURED", "SUCCESS", shared_storage, mission_id)
+                    log(f"🚀 VISUAL UPLINK SECURED: {public_url}", "SUCCESS", shared_storage, mission_id)
             else:
-                log(f"ImgBB Error: {res.text}", "ERROR", shared_storage, mission_id)
+                log(f"❌ ImgBB API Error: {res.text}", "ERROR", shared_storage, mission_id)
         else:
-            log("Failed to retrieve capture record or API Key missing.", "ERROR", shared_storage, mission_id)
+            if not record:
+                log(f"❌ Record '{record_key}' not found in store", "ERROR", shared_storage, mission_id)
+            if not imgbb_key:
+                log("❌ Upload skipped: No API Key", "ERROR", shared_storage, mission_id)
 
         # ---------------------------------------------------------
         # 3. EXTRACTION DES DONNÉES (RAW-HTTP)
@@ -84,7 +97,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         data_run_id = data_run["id"]
         last_log_offset = 0
 
-        # Boucle de télémétrie pour les logs
         while True:
             details = client.run(data_run_id).get()
             status = details.get("status")
@@ -105,7 +117,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
         if status == "SUCCEEDED":
             dataset_id = details.get("defaultDatasetId")
-            log(f"✅ Mission successful.", "SUCCESS", shared_storage, mission_id)
+            log(f"✅ Mission successful for session {mission_id}.", "SUCCESS", shared_storage, mission_id)
             return dataset_id
         
         return None
