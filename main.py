@@ -22,7 +22,7 @@ class MissionManager:
 
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 
-# ThreadPoolExecutor gère les appels I/O bloquants (Requests/Apify)
+# ThreadPoolExecutor pour gérer les appels I/O bloquants
 executor = ThreadPoolExecutor(max_workers=10)
 
 # --- CONFIGURATION CORS ---
@@ -41,49 +41,53 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    """Endpoint de santé pour Render."""
+    """Endpoint de santé vital pour Render."""
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.8_STABLE_PROXY",
+        "version": "2.2.9_FINAL_STABLE",
         "active_missions": len(MissionManager.missions)
     }
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    Relais Serveur -> Client.
-    Résout les erreurs 403 d'Apify en téléchargeant l'image via le token interne.
+    PROXY LIVE : Relais entre Apify et le Client.
+    Sert l'image avec authentification interne pour éviter le noir (403).
     """
     if mission_id not in MissionManager.missions:
-        print(f"DEBUG: Proxy requested for unknown mission {mission_id}")
         return Response(status_code=404)
     
     stream_url = MissionManager.missions[mission_id].get("stream_url")
     if not stream_url:
-        # L'URL n'est pas encore prête, on renvoie une image vide ou 204
         return Response(status_code=204)
 
     try:
-        # Requête interne vers Apify (Render a les droits)
-        resp = requests.get(stream_url, timeout=5)
+        # Requête vers Apify avec timeout court pour ne pas bloquer le serveur
+        resp = requests.get(stream_url, timeout=4)
+        
         if resp.status_code == 200:
             return Response(content=resp.content, media_type="image/png")
-        else:
-            print(f"DEBUG: Apify storage returned {resp.status_code} for {mission_id}")
+        
+        # Si Apify renvoie 404 (image pas encore écrite), on sert un pixel transparent
+        # Cela évite le clignotement noir sur l'UI
+        elif resp.status_code == 404:
+            empty_pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\x2e\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+            return Response(content=empty_pixel, media_type="image/png")
+            
     except Exception as e:
-        print(f"DEBUG: Proxy error for {mission_id}: {str(e)}")
+        print(f"Proxy Buffer Exception: {str(e)}")
     
     return Response(status_code=404)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Orchestrateur de Mission - Pipeline Complet."""
+    """Pipeline d'exécution asynchrone."""
     loop = asyncio.get_event_loop()
     try:
         storage = MissionManager.missions
         shared_mem = storage[mission_id]
         
-        # --- Phase 1: Extraction ---
+        # Phase 1: Navigation et Capture
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, storage, mission_id
         )
@@ -91,12 +95,12 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
         if dataset_id:
             shared_mem["status"] = "analyzing"
             
-            # --- Phase 2: Analyse ---
+            # Phase 2: Analyse Algorithmique
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, storage, mission_id
             )
             
-            # --- Phase 3: Rapport ---
+            # Phase 3: Compilation du Rapport
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, storage
             )
@@ -114,18 +118,16 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             shared_mem["live_logs"].append({
                 "timestamp": time.strftime("%H:%M:%S"),
                 "level": "ERROR",
-                "message": "❌ Mission failed: No data extracted."
+                "message": "❌ Mission failed: Uplink timed out or empty dataset."
             })
         
-        # --- PHASE 4: PERSISTENCE POUR LE FRONT ---
-        # On garde la mission 5 minutes pour laisser le temps à l'utilisateur de lire
+        # Persistence de 5 minutes pour laisser l'utilisateur consulter les résultats
         await asyncio.sleep(300) 
         if mission_id in MissionManager.missions:
             del MissionManager.missions[mission_id]
-            print(f"DEBUG: Mission {mission_id} cleared from memory.")
             
     except Exception as e:
-        print(f"💥 Critical Error {mission_id}: {str(e)}")
+        print(f"Critical System Failure {mission_id}: {str(e)}")
         if mission_id in MissionManager.missions:
             MissionManager.missions[mission_id]["status"] = "error"
 
@@ -135,7 +137,7 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Auth Check
+    # Validation Sécurisée
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -144,7 +146,6 @@ async def start_mission(
 
     mission_id = str(uuid.uuid4())[:8]
     
-    # Init storage
     MissionManager.missions[mission_id] = {
         "status": "running",
         "stream_url": None, 
@@ -172,7 +173,7 @@ async def get_mission_status(
          raise HTTPException(status_code=401, detail="Unauthorized")
 
     if mission_id not in MissionManager.missions:
-        raise HTTPException(status_code=404, detail="Mission ID invalid")
+        raise HTTPException(status_code=404, detail="Mission ID not found")
         
     return MissionManager.missions[mission_id]
 

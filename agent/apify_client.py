@@ -21,14 +21,14 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         "startUrls": [{"url": str(url)}],
         "query": str(goal),
         "maxPagesPerCrawl": 5, 
-        "dynamicContentWaitSecs": 10,
+        "dynamicContentWaitSecs": 10, # Force l'agent à "contempler" la page (essentiel pour le screenshot)
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
         "saveScreenshot": True,
         "useChrome": True,
         "pageLoadTimeoutSecs": 60,
-        "waitUntil": "networkidle2" # Force l'attente du chargement complet des assets
+        "waitUntil": "networkidle2" # Attend que le réseau soit calme (assets chargés)
     }
 
     try:
@@ -56,8 +56,8 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         # Attente bloquante du résultat final
         final_run_result = client.run(run_id).wait_for_finish(wait_secs=500)
         
-        # Délai de grâce pour la persistence des données
-        time.sleep(5)
+        # Délai de grâce crucial pour laisser Apify finaliser l'écriture du screenshot sur le disque
+        time.sleep(10)
 
         if final_run_result and "defaultDatasetId" in final_run_result:
             dataset_id = final_run_result.get("defaultDatasetId")
