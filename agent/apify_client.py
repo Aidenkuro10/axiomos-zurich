@@ -21,7 +21,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         "startUrls": [{"url": url}],
         "query": goal,
         "maxPagesPerCrawl": 3,
-        "dynamicContentWaitSecs": 10, # Increased to keep the stream alive
+        "dynamicContentWaitSecs": 20, # Increased to keep the stream alive
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
