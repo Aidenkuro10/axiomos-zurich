@@ -8,9 +8,9 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version IMGBB PARALLÈLE + RETRY LOGIC.
-    Déclenche le visuel et les données en simultané.
-    Intègre une boucle de vérification pour éviter les records vides.
+    Orchestrateur LuxSoft - Version BULLDOZER.
+    Capture le visuel et les données en parallèle.
+    Boucle de persistance étendue (30s) pour garantir la récupération de l'image.
     """
     token = get_apify_token()
     if not token:
@@ -27,16 +27,16 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         log(f"🔎 Key detected (Prefix: {imgbb_key[:4]}...)", "INFO", shared_storage, mission_id)
 
     try:
-        log(f"Uplink Initialized. Triggering Visual Agent...", "INFO", shared_storage, mission_id)
+        log(f"Mission {mission_id}: Initiating DUAL-CORE execution...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DU VISUALISEUR (En arrière-plan via .start)
+        # 1. LANCEMENT DU VISUALISEUR (Mode rapide 'load')
         visual_run = client.actor("apify/screenshot-url").start(
             run_input={
                 "url": str(url),
-                "waitUntil": "networkidle2",
+                "waitUntil": "load",
                 "width": 1280,
                 "height": 720,
-                "delay": 2000 
+                "delay": 1000 
             }
         )
         v_run_id = visual_run["id"]
@@ -55,7 +55,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         )
         d_run_id = data_run["id"]
 
-        # 3. BOUCLE DE TÉLÉMÉTRIE MIXTE (Logs Data + Check Visuel)
+        # 3. BOUCLE DE TÉLÉMÉTRIE MIXTE
         last_log_offset = 0
         visual_secured = False
         
@@ -64,7 +64,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
             
-            # Gestion de l'image : on tente l'upload dès que l'Actor visuel a fini
+            # GESTION RENFORCÉE DE L'IMAGE
             if not visual_secured:
                 v_details = client.run(v_run_id).get()
                 v_status = v_details.get("status")
@@ -72,17 +72,17 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 if v_status == "SUCCEEDED":
                     v_store_id = v_details.get("defaultKeyValueStoreId")
                     
-                    # --- BOUCLE DE PERSISTANCE POUR LE RECORD ---
+                    # --- BOUCLE BULLDOZER : 15 TENTATIVES (30 SECONDES) ---
                     record = None
-                    for i in range(5): # On tente 5 fois (toutes les 2 sec)
+                    for i in range(15):
                         record = client.key_value_store(v_store_id).get_record("OUTPUT")
                         if record and record.get('value'):
                             break
-                        log(f"Syncing visual store (attempt {i+1}/5)...", "INFO", shared_storage, mission_id)
+                        log(f"Syncing visual store (attempt {i+1}/15)...", "INFO", shared_storage, mission_id)
                         time.sleep(2)
                     
                     if record and imgbb_key:
-                        log("Viewport captured. Syncing to ImgBB...", "ACTION", shared_storage, mission_id)
+                        log("Viewport found. Syncing to ImgBB...", "ACTION", shared_storage, mission_id)
                         img_b64 = base64.b64encode(record['value']).decode('utf-8')
                         res = requests.post(
                             "https://api.imgbb.com/1/upload", 
@@ -95,8 +95,9 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                                 shared_storage[mission_id]["stream_url"] = public_url
                                 log(f"🚀 VISUAL UPLINK SECURED", "SUCCESS", shared_storage, mission_id)
                                 visual_secured = True
+                                break # On sort de la boucle de retry visuel
                     else:
-                        log("⚠️ Visual capture timeout: Output remained empty.", "WARNING", shared_storage, mission_id)
+                        log("⚠️ Visual capture timeout: Output remained empty after 30s.", "WARNING", shared_storage, mission_id)
                         visual_secured = True 
 
             # Récupération et affichage des logs de l'agent Data
@@ -109,7 +110,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                             log(f"[AGENT] {line.strip()}", "INFO", shared_storage, mission_id)
                     last_log_offset = len(full_log)
 
-            # Sortie de boucle si l'extraction de données est terminée
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
             
