@@ -5,8 +5,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft pour l'Actor Apify RAG Web Browser.
-    Gère la capture visuelle Stop-Motion et la synchronisation de télémétrie.
+    Orchestrateur LuxSoft avec sondes de debug visuel.
+    Cible le Key-Value Store spécifique du run pour garantir l'accès à l'image.
     """
     token = get_apify_token()
     if not token:
@@ -15,8 +15,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
     client = ApifyClient(token)
     
-    # Configuration Robuste - Typage strict pour le schéma Apify
-    # Note : On utilise saveScreenshot pour forcer la génération du fichier image
+    # Configuration optimisée pour forcer le screenshot
     run_input = {
         "startUrls": [{"url": str(url)}],
         "query": str(goal),
@@ -25,7 +24,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
-        "saveScreenshot": True,  
+        "saveScreenshot": True, # Déclencheur de la caméra
         "useChrome": True,
         "pageLoadTimeoutSecs": 60,
         "maxConcurrency": 1,
@@ -36,31 +35,27 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Initiating Apify handshake for {url}...", "INFO", shared_storage, mission_id)
         
-        # Initialisation de l'Actor
-        actor_call = client.actor("apify/rag-web-browser")
-        run = actor_call.start(run_input=run_input)
-        
-        if not run or "id" not in run:
-            raise ValueError("Failed to retrieve Run ID from Apify.")
-
+        # Lancement du run
+        run = client.actor("apify/rag-web-browser").start(run_input=run_input)
         run_id = run["id"]
+        
+        # Récupération de l'ID du store (plus fiable que le chemin relatif)
+        store_id = run.get("defaultKeyValueStoreId", "default")
 
-        # Construction de l'URL du Key-Value Store pour l'image Stop-Motion
-        # Ce lien pointe vers l'enregistrement 'screenshot.png' créé par saveScreenshot
-        stream_url = f"https://api.apify.com/v2/runs/{run_id}/key-value-store/records/screenshot.png?token={token}"
+        # URL de debug avec store_id explicite
+        stream_url = f"https://api.apify.com/v2/key-value-stores/{store_id}/records/screenshot.png?token={token}"
         
         if shared_storage and mission_id in shared_storage:
-            # Injection immédiate pour le polling du frontend
             shared_storage[mission_id]["stream_url"] = stream_url
-            log(f"Visual uplink synchronized. Agent ID: {run_id}", "ACTION", shared_storage, mission_id)
+            # LOG DE DEBUG CRITIQUE : Tu pourras cliquer sur ce lien dans ta console UI
+            log(f"DEBUG VISUAL UPLINK: {stream_url}", "ACTION", shared_storage, mission_id)
 
         log("Agent is navigating and capturing visual evidence...", "INFO", shared_storage, mission_id)
         
-        # Blocage contrôlé avec timeout étendu pour la navigation
-        run_handle = client.run(run_id)
-        final_run_result = run_handle.wait_for_finish(wait_secs=500)
+        # Attente de la fin du run
+        final_run_result = client.run(run_id).wait_for_finish(wait_secs=500)
         
-        # Délai de grâce pour la persistence du dernier screenshot
+        # On attend un peu pour que le dernier screenshot soit persisté
         time.sleep(5)
 
         if final_run_result and "defaultDatasetId" in final_run_result:
@@ -72,6 +67,5 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             return None
             
     except Exception as e:
-        # Capture générique pour éviter tout crash au démarrage du serveur
         log(f"Internal System Error: {str(e)}", "ERROR", shared_storage, mission_id)
         return None
