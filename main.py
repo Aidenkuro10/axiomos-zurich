@@ -1,9 +1,10 @@
 import uuid
 import time
 import asyncio
+import os
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Header, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -19,17 +20,16 @@ class MissionManager:
 
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 
-# ThreadPoolExecutor gère les appels I/O bloquants (Apify/Requests)
+# ThreadPoolExecutor gère les appels I/O bloquants
 executor = ThreadPoolExecutor(max_workers=10)
 
-# --- CONFIGURATION CORS ULTRA-PERMISSIVE ---
+# --- CONFIGURATION CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://axiomos.ai", "http://axiomos.ai", "*"],
+    allow_origins=["*"], # Plus sûr pour le hackathon afin d'éviter les blocages client
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE", "HEAD"],
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
 class MissionRequest(BaseModel):
@@ -39,25 +39,22 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    """Endpoint de santé pour le monitoring Render."""
+    """Endpoint de santé vital pour Render."""
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.5_ZRH_AUTONOMOUS",
-        "uptime_node": "Render Frankfurt"
+        "version": "2.2.6_STABLE",
+        "port": os.environ.get("PORT", "10000")
     }
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """
-    Orchestrateur de Mission. 
-    Exécute séquentiellement l'extraction (Browser-Use), l'analyse et le rapport.
-    """
+    """Orchestrateur de Mission."""
     loop = asyncio.get_event_loop()
     try:
         storage = MissionManager.missions
         shared_mem = storage[mission_id]
         
-        # --- Phase 1: Extraction via Apify (Browser-Use) ---
+        # --- Phase 1: Extraction ---
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, storage, mission_id
         )
@@ -65,12 +62,12 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
         if dataset_id:
             shared_mem["status"] = "analyzing"
             
-            # --- Phase 2: Analyse LuxSoft ---
+            # --- Phase 2: Analyse ---
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, storage, mission_id
             )
             
-            # --- Phase 3: Rapport Stratégique ---
+            # --- Phase 3: Rapport ---
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, storage
             )
@@ -88,17 +85,16 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             shared_mem["live_logs"].append({
                 "timestamp": time.strftime("%H:%M:%S"),
                 "level": "ERROR",
-                "message": "❌ Mission failed: Agent returned an empty dataset."
+                "message": "❌ Mission failed: Extraction returned an empty dataset."
             })
         
-        # --- PHASE 4: SURVIVAL DELAY ---
-        # Garde les données en mémoire pour permettre au front de finir le polling
-        print(f"DEBUG: Mission {mission_id} enters grace period.")
-        await asyncio.sleep(60) 
-        print(f"DEBUG: Mission {mission_id} task finalized.")
+        # --- PHASE 4: GRACE PERIOD ---
+        await asyncio.sleep(120) # Augmenté à 2 min pour être sûr que le front récupère tout
+        if mission_id in MissionManager.missions:
+            del MissionManager.missions[mission_id]
             
     except Exception as e:
-        print(f"💥 Critical LuxSoft Error {mission_id}: {str(e)}")
+        print(f"💥 Critical Error {mission_id}: {str(e)}")
         if mission_id in MissionManager.missions:
             MissionManager.missions[mission_id]["status"] = "error"
 
@@ -108,16 +104,14 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # --- NETTOYAGE AUTHENTICATION ---
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
     if received != expected:
-        raise HTTPException(status_code=401, detail="Unauthorized Uplink")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     mission_id = str(uuid.uuid4())[:8]
     
-    # Initialisation de la structure de données
     MissionManager.missions[mission_id] = {
         "status": "running",
         "stream_url": None, 
@@ -131,25 +125,28 @@ async def start_mission(
     
     background_tasks.add_task(execute_mission_task, mission_id, request.url, request.goal)
     
-    return {
-        "mission_id": mission_id, 
-        "status": "initiated",
-        "uplink": "stable"
-    }
+    return {"mission_id": mission_id, "status": "initiated"}
 
 @app.get("/mission-status/{mission_id}")
 async def get_mission_status(
     mission_id: str, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # --- NETTOYAGE AUTHENTICATION ---
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
     if received != expected:
-         raise HTTPException(status_code=401, detail="Unauthorized Status Request")
+         raise HTTPException(status_code=401, detail="Unauthorized")
 
     if mission_id not in MissionManager.missions:
-        raise HTTPException(status_code=404, detail="Mission ID not found")
+        raise HTTPException(status_code=404, detail="Mission expired or not found")
         
     return MissionManager.missions[mission_id]
+
+# --- LE FIX POUR RENDER ---
+if __name__ == "__main__":
+    import uvicorn
+    # Récupère le port de Render ou utilise 10000 par défaut
+    port = int(os.environ.get("PORT", 10000))
+    # Écoute sur 0.0.0.0 est CRITIQUE pour Render
+    uvicorn.run(app, host="0.0.0.0", port=port)

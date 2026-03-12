@@ -6,8 +6,8 @@ from utils.logger import log
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Orchestrateur LuxSoft - Version SURVIVAL STABLE.
-    Retour à RAG-WEB-BROWSER pour la fiabilité des data.
-    Fix visuel via l'URL de record directe.
+    Extraction : apify/rag-web-browser (fiabilité data confirmée).
+    Visuel : Captation via screenshot.png dans le Key-Value Store.
     """
     token = get_apify_token()
     if not token:
@@ -16,7 +16,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
     client = ApifyClient(token)
     
-    # On remet la config qui te donnait des "résultats magnifiques"
+    # Configuration optimisée pour forcer le rendu et la capture visuelle
     run_input = {
         "startUrls": [{"url": str(url)}],
         "query": str(goal),
@@ -25,7 +25,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
-        "saveScreenshot": True,  # Indispensable pour le flux
+        "saveScreenshot": True,
         "useChrome": True,
         "pageLoadTimeoutSecs": 60
     }
@@ -33,31 +33,30 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Initiating LuxSoft Handshake for {url}...", "INFO", shared_storage, mission_id)
         
-        # Lancement de l'acteur fiable
+        # Lancement de l'acteur (Appel asynchrone pour récupérer l'ID immédiatement)
         run = client.actor("apify/rag-web-browser").start(run_input=run_input)
         
         if not run or "id" not in run:
-            raise ValueError("Failed to retrieve Run ID from Apify.")
+            raise ValueError("No Run ID received from Apify.")
 
         run_id = run["id"]
-        # On cible le store par défaut du run
+        # Extraction du store ID pour le polling visuel
         store_id = run.get("defaultKeyValueStoreId", "default")
 
-        # FIX VISUEL : On pointe sur 'screenshot.png' qui est le standard de cet acteur
+        # Construction de l'URL directe vers le screenshot pour le front-end
         stream_url = f"https://api.apify.com/v2/key-value-stores/{store_id}/records/screenshot.png?token={token}"
         
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = stream_url
-            # Ce log apparaîtra en bleu dans ta console
+            # Log de succès critique pour déclencher l'UI
             log(f"🚀 VIDEO UPLINK ESTABLISHED: {stream_url}", "ACTION", shared_storage, mission_id)
 
         log("Agent is navigating and capturing visual evidence...", "INFO", shared_storage, mission_id)
         
-        # Attente bloquante
-        run_handle = client.run(run_id)
-        final_run_result = run_handle.wait_for_finish(wait_secs=500)
+        # Attente bloquante du résultat final (timeout 500s)
+        final_run_result = client.run(run_id).wait_for_finish(wait_secs=500)
         
-        # Temps de persistence
+        # Délai de grâce pour la synchronisation finale du storage Apify
         time.sleep(5)
 
         if final_run_result and "defaultDatasetId" in final_run_result:
@@ -65,7 +64,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             log(f"✅ Mission successful. Dataset ID: {dataset_id}", "SUCCESS", shared_storage, mission_id)
             return dataset_id
         else:
-            log("❌ Extraction failed to return a valid dataset.", "ERROR", shared_storage, mission_id)
+            log("❌ Extraction failed: Dataset ID missing.", "ERROR", shared_storage, mission_id)
             return None
             
     except Exception as e:
