@@ -56,7 +56,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.6.2_LIVE_FIX",
+        "version": "2.6.1_STARTER_STABLE",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -65,14 +65,13 @@ def read_root():
 async def proxy_live_image(mission_id: str):
     """
     Proxy Ultra-Résilient.
-    Interroge Apify et force le rafraîchissement du flux visuel.
+    Force la récupération de l'image avec retries internes pour éviter l'écran noir.
     """
     mission = load_mission(mission_id)
     if not mission:
         return Response(status_code=404, content="Mission unknown")
     
     stream_url = mission.get("stream_url")
-    # Image de fond luxueuse en attendant l'uplink
     idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
     
     if not stream_url:
@@ -82,29 +81,21 @@ async def proxy_live_image(mission_id: str):
         except:
             return Response(status_code=204)
 
-    # BOUCLE DE FORCAGE : On tente de récupérer l'image. 
-    # Avec Playwright, le screenshot est généré dès le chargement de la page.
-    for attempt in range(4):
+    # BOUCLE DE FORCAGE : On tente de récupérer l'image 3 fois si Apify est lent
+    for attempt in range(3):
         try:
-            # On ajoute un timestamp à la requête Apify pour bypasser leur propre cache
-            burst_url = f"{stream_url}&_ts={int(time.time())}"
-            resp = requests.get(burst_url, timeout=4)
+            resp = requests.get(stream_url, timeout=5)
+            # On vérifie que le contenu est une vraie image (plus de 1000 octets)
+            if resp.status_code == 200 and len(resp.content) > 1000:
+                return Response(content=resp.content, media_type="image/png")
             
-            # Une image valide fait généralement plus de 2000 octets
-            if resp.status_code == 200 and len(resp.content) > 1500:
-                return Response(
-                    content=resp.content, 
-                    media_type="image/png",
-                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
-                )
-            
-            # Si l'image n'est pas encore prête, on attend très peu
-            await asyncio.sleep(1)
+            # Si échec ou image vide, on attend un peu avant de réessayer
+            await asyncio.sleep(1.5)
         except Exception as e:
             print(f"Proxy Attempt {attempt} failed: {e}")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
 
-    # Fallback sur l'image d'attente si l'agent n'a pas encore pris sa première photo
+    # Fallback final sur l'image d'attente si l'image Apify est vraiment inaccessible
     try:
         fallback_resp = requests.get(idle_url)
         return Response(content=fallback_resp.content, media_type="image/jpeg")
@@ -114,29 +105,27 @@ async def proxy_live_image(mission_id: str):
 async def execute_mission_task(mission_id: str, url: str, goal: str):
     """Pipeline d'orchestration unifié."""
     loop = asyncio.get_event_loop()
-    # On charge l'état initial
     temp_storage = {mission_id: load_mission(mission_id)}
 
     try:
         # Phase 1: Capture Visuelle et Extraction Unifiée (Agent Core)
-        # launch_apify_automation va maintenant mettre à jour temp_storage['stream_url'] immédiatement
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, temp_storage, mission_id
         )
         
-        # Mise à jour après la phase Apify
+        # Sauvegarde de l'URL de stream (maintenant fiable)
         save_mission(mission_id, temp_storage[mission_id])
 
         if dataset_id:
             temp_storage[mission_id]["status"] = "analyzing"
             save_mission(mission_id, temp_storage[mission_id])
 
-            # Phase 2: Analyse des deals
+            # Phase 2: Analyse
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, temp_storage, mission_id
             )
             
-            # Phase 3: Construction du rapport stratégique
+            # Phase 3: Rapport
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, temp_storage
             )
@@ -145,7 +134,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             temp_storage[mission_id]["status"] = "completed"
             
             save_mission(mission_id, temp_storage[mission_id])
-            print(f"--- SUCCESS: Mission {mission_id} completed ---")
+            print(f"--- SUCCESS: Mission {mission_id} completed and persisted ---")
         else:
             temp_storage[mission_id]["status"] = "failed"
             save_mission(mission_id, temp_storage[mission_id])
@@ -163,7 +152,6 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Nettoyage des headers
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -175,7 +163,7 @@ async def start_mission(
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Mission started (Uplink Synchronizing...)"}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Mission started (Persistent Mode)."}],
         "report": None
     }
     save_mission(mission_id, initial_data)
@@ -202,6 +190,5 @@ async def get_mission_status(
 
 if __name__ == "__main__":
     import uvicorn
-    # Render utilise la variable d'environnement PORT
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
