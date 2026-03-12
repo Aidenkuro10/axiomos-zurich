@@ -2,9 +2,11 @@ import uuid
 import time
 import asyncio
 import os
+import requests
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -23,10 +25,10 @@ app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 # ThreadPoolExecutor gère les appels I/O bloquants
 executor = ThreadPoolExecutor(max_workers=10)
 
-# --- CONFIGURATION CORS ---
+# --- CONFIGURATION CORS ULTRA-PERMISSIVE ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Plus sûr pour le hackathon afin d'éviter les blocages client
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,9 +45,32 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.6_STABLE",
+        "version": "2.2.7_VISUAL_FIX",
         "port": os.environ.get("PORT", "10000")
     }
+
+@app.get("/proxy-live/{mission_id}")
+async def proxy_live_image(mission_id: str):
+    """
+    PROXY CRITIQUE : Télécharge l'image d'Apify côté serveur 
+    et la sert au front-end pour éviter les erreurs 403/CORS.
+    """
+    if mission_id not in MissionManager.missions:
+        return Response(status_code=404)
+    
+    stream_url = MissionManager.missions[mission_id].get("stream_url")
+    if not stream_url:
+        return Response(status_code=404)
+
+    try:
+        # Le serveur Render possède les credentials pour accéder à l'image
+        resp = requests.get(stream_url, timeout=5)
+        if resp.status_code == 200:
+            return Response(content=resp.content, media_type="image/png")
+    except Exception as e:
+        print(f"Proxy Error: {str(e)}")
+    
+    return Response(status_code=404)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
     """Orchestrateur de Mission."""
@@ -89,7 +114,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             })
         
         # --- PHASE 4: GRACE PERIOD ---
-        await asyncio.sleep(120) # Augmenté à 2 min pour être sûr que le front récupère tout
+        await asyncio.sleep(180) # Augmenté à 3 min pour le polling final
         if mission_id in MissionManager.missions:
             del MissionManager.missions[mission_id]
             
@@ -143,10 +168,7 @@ async def get_mission_status(
         
     return MissionManager.missions[mission_id]
 
-# --- LE FIX POUR RENDER ---
 if __name__ == "__main__":
     import uvicorn
-    # Récupère le port de Render ou utilise 10000 par défaut
     port = int(os.environ.get("PORT", 10000))
-    # Écoute sur 0.0.0.0 est CRITIQUE pour Render
     uvicorn.run(app, host="0.0.0.0", port=port)
