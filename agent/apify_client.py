@@ -5,8 +5,9 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version UNIFIÉE, LIVE & ASYNCHRONE.
-    Étape finale : Activation du mode Headed pour forcer le rendu visuel.
+    Orchestrateur LuxSoft - Version DUAL-CORE (Optimisée pour Screenshot Generator).
+    Utilise 'apify/screenshot-url' pour le visuel immédiat.
+    Utilise 'apify/rag-web-browser' pour l'extraction des données.
     """
     token = get_apify_token()
     if not token:
@@ -16,42 +17,58 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     client = ApifyClient(token)
 
     try:
-        log(f"Initiating Unified Strategic Mission for {url}...", "INFO", shared_storage, mission_id)
-        log("Step 1/1: Deploying Agent Core (Playwright Engine)...", "ACTION", shared_storage, mission_id)
+        log(f"Uplink Initialized. Deploying Agents for {url}...", "INFO", shared_storage, mission_id)
         
-        # Lancement asynchrone avec forçage du rendu
-        run = client.actor("apify/rag-web-browser").start(
+        # ---------------------------------------------------------
+        # 1. LANCEMENT DU VISUALISEUR (Screenshot Generator)
+        # ---------------------------------------------------------
+        # Cet Actor est ultra-rapide pour générer un aperçu réel.
+        visual_run = client.actor("apify/screenshot-url").start(
+            run_input={
+                "url": str(url),
+                "waitUntil": "networkidle2",
+                "width": 1280,
+                "height": 720,
+                "delay": 2000 # On laisse 2s pour que le contenu s'affiche
+            }
+        )
+        
+        visual_store_id = visual_run.get("defaultKeyValueStoreId")
+        # Le Screenshot Generator enregistre l'image finale sous le nom 'OUTPUT'
+        stream_url = f"https://api.apify.com/v2/key-value-stores/{visual_store_id}/records/OUTPUT?token={token}&disableRedirect=true"
+        
+        # Injection immédiate pour l'interface
+        if shared_storage and mission_id in shared_storage:
+            shared_storage[mission_id]["stream_url"] = stream_url
+            log(f"🚀 VISUAL FEED ONLINE", "SUCCESS", shared_storage, mission_id)
+
+        # ---------------------------------------------------------
+        # 2. LANCEMENT DE L'AGENT DATA (RAG Web Browser)
+        # ---------------------------------------------------------
+        log("Deploying Data Specialist for analysis...", "ACTION", shared_storage, mission_id)
+        data_run = client.actor("apify/rag-web-browser").start(
             run_input={
                 "startUrls": [{"url": str(url)}],
                 "query": str(goal),
-                "maxPagesPerCrawl": 1, 
-                "saveScreenshot": True,
-                "useChrome": True,
+                "maxPagesPerCrawl": 1,
                 "scrapingTool": "browser-playwright",
-                "headless": False,            # FORCE le navigateur à être "visible"
-                "forceScreenshots": True,      # FORCE la capture immédiate
                 "proxyConfiguration": {"useApifyProxy": True}
-            },
-            memory_mbytes=2048 
+            }
         )
-
-        run_id = run["id"]
-        store_id = run.get("defaultKeyValueStoreId")
         
-        # URL du screenshot pointant vers le Key-Value Store
-        stream_url = f"https://api.apify.com/v2/key-value-stores/{store_id}/records/screenshot.png?token={token}&disableRedirect=true"
-        
-        if shared_storage and mission_id in shared_storage:
-            shared_storage[mission_id]["stream_url"] = stream_url
-            log(f"🚀 VISUAL UPLINK ESTABLISHED", "SUCCESS", shared_storage, mission_id)
+        data_run_id = data_run["id"]
 
-        # BOUCLE DE TÉLÉMÉTRIE (Logs en direct)
+        # ---------------------------------------------------------
+        # 3. BOUCLE DE TÉLÉMÉTRIE (Logs synchronisés)
+        # ---------------------------------------------------------
         last_log_offset = 0
         while True:
-            current_run = client.run(run_id).get()
-            status = current_run.get("status")
+            # On surveille l'agent DATA pour l'analyse
+            details = client.run(data_run_id).get()
+            status = details.get("status")
             
-            full_log = client.log(run_id).get()
+            # Récupération des logs de l'agent DATA pour ton dashboard
+            full_log = client.log(data_run_id).get()
             if full_log:
                 new_logs = full_log[last_log_offset:]
                 if new_logs.strip():
@@ -66,13 +83,13 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             time.sleep(2)
 
         if status == "SUCCEEDED":
-            dataset_id = current_run.get("defaultDatasetId")
+            dataset_id = details.get("defaultDatasetId")
             log(f"✅ Mission successful: Dataset {dataset_id} ready.", "SUCCESS", shared_storage, mission_id)
             return dataset_id
         
-        log(f"❌ Agent terminated with status: {status}", "ERROR", shared_storage, mission_id)
+        log(f"❌ Data Specialist failed with status: {status}", "ERROR", shared_storage, mission_id)
         return None
             
     except Exception as e:
-        log(f"💥 Critical Failure in Apify Client: {str(e)}", "ERROR", shared_storage, mission_id)
+        log(f"💥 Critical Dual-Core Failure: {str(e)}", "ERROR", shared_storage, mission_id)
         return None
