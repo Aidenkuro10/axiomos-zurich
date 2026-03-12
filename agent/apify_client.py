@@ -6,7 +6,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Drives the Apify RAG Web Browser Actor.
     Captures the run ID immediately to provide a live video feed URL.
-    Optimized for Live View rendering and session stability.
+    Optimized for 'Showmanship Mode': slower, deeper navigation for live demos.
     """
     token = get_apify_token()
     if not token:
@@ -15,18 +15,20 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
     client = ApifyClient(token)
     
-    # Configuration for LuxSoft Luxury Arbitrage
-    # Enhanced wait time to stabilize the browser-monitor session
+    # Configuration for LuxSoft Luxury Arbitrage - Demo Optimized
     run_input = {
         "startUrls": [{"url": url}],
         "query": goal,
-        "maxPagesPerCrawl": 3,
-        "dynamicContentWaitSecs": 20, # Increased to keep the stream alive
+        "maxPagesPerCrawl": 5,           # Deeper crawl to show navigation logic
+        "dynamicContentWaitSecs": 25,    # Extended pause to stabilize live feed
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
         "screenshot": True,
-        "useChrome": True # Ensures a more standard rendering for the live view
+        "useChrome": True,
+        # Force a more deliberate agent behavior
+        "pageLoadTimeoutSecs": 60,
+        "waitForSelector": ".article-item, .listing-item", # Ensures watches are rendered before moving
     }
 
     try:
@@ -37,7 +39,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         run_id = run["id"]
 
         # Generate the Live View URL for the Frontend Iframe
-        # Format used for real-time browser monitoring
         stream_url = f"https://api.apify.com/v2/browser-monitor/{run_id}/live-view?token={token}"
         
         # Inject the stream URL into shared storage for UI synchronization
@@ -45,11 +46,11 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             shared_storage[mission_id]["stream_url"] = stream_url
             log(f"📡 Live feed synchronized. Agent ID: {run_id}", "ACTION", shared_storage, mission_id)
 
-        # Now wait for the actor to finish and get the final result
-        log(f"🕵️ Agent is navigating. Extraction in progress...", "INFO", shared_storage, mission_id)
+        # Log the beginning of visual exploration
+        log(f"🕵️ Agent is navigating and cross-referencing data...", "INFO", shared_storage, mission_id)
         
-        # Increased timeout for deep rendering and stable extraction
-        final_run_result = client.run(run_id).wait_for_finish(wait_secs=300)
+        # Wait for the actor to finish its deliberate process
+        final_run_result = client.run(run_id).wait_for_finish(wait_secs=400)
         
         if final_run_result and "defaultDatasetId" in final_run_result:
             dataset_id = final_run_result.get("defaultDatasetId")
