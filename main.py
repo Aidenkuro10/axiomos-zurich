@@ -22,10 +22,10 @@ class MissionManager:
 
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 
-# ThreadPoolExecutor gère les appels I/O bloquants
+# ThreadPoolExecutor gère les appels I/O bloquants (Requests/Apify)
 executor = ThreadPoolExecutor(max_workers=10)
 
-# --- CONFIGURATION CORS ULTRA-PERMISSIVE ---
+# --- CONFIGURATION CORS ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,39 +41,43 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    """Endpoint de santé vital pour Render."""
+    """Endpoint de santé pour Render."""
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.2.7_VISUAL_FIX",
-        "port": os.environ.get("PORT", "10000")
+        "version": "2.2.8_STABLE_PROXY",
+        "active_missions": len(MissionManager.missions)
     }
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    PROXY CRITIQUE : Télécharge l'image d'Apify côté serveur 
-    et la sert au front-end pour éviter les erreurs 403/CORS.
+    Relais Serveur -> Client.
+    Résout les erreurs 403 d'Apify en téléchargeant l'image via le token interne.
     """
     if mission_id not in MissionManager.missions:
+        print(f"DEBUG: Proxy requested for unknown mission {mission_id}")
         return Response(status_code=404)
     
     stream_url = MissionManager.missions[mission_id].get("stream_url")
     if not stream_url:
-        return Response(status_code=404)
+        # L'URL n'est pas encore prête, on renvoie une image vide ou 204
+        return Response(status_code=204)
 
     try:
-        # Le serveur Render possède les credentials pour accéder à l'image
+        # Requête interne vers Apify (Render a les droits)
         resp = requests.get(stream_url, timeout=5)
         if resp.status_code == 200:
             return Response(content=resp.content, media_type="image/png")
+        else:
+            print(f"DEBUG: Apify storage returned {resp.status_code} for {mission_id}")
     except Exception as e:
-        print(f"Proxy Error: {str(e)}")
+        print(f"DEBUG: Proxy error for {mission_id}: {str(e)}")
     
     return Response(status_code=404)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Orchestrateur de Mission."""
+    """Orchestrateur de Mission - Pipeline Complet."""
     loop = asyncio.get_event_loop()
     try:
         storage = MissionManager.missions
@@ -110,13 +114,15 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             shared_mem["live_logs"].append({
                 "timestamp": time.strftime("%H:%M:%S"),
                 "level": "ERROR",
-                "message": "❌ Mission failed: Extraction returned an empty dataset."
+                "message": "❌ Mission failed: No data extracted."
             })
         
-        # --- PHASE 4: GRACE PERIOD ---
-        await asyncio.sleep(180) # Augmenté à 3 min pour le polling final
+        # --- PHASE 4: PERSISTENCE POUR LE FRONT ---
+        # On garde la mission 5 minutes pour laisser le temps à l'utilisateur de lire
+        await asyncio.sleep(300) 
         if mission_id in MissionManager.missions:
             del MissionManager.missions[mission_id]
+            print(f"DEBUG: Mission {mission_id} cleared from memory.")
             
     except Exception as e:
         print(f"💥 Critical Error {mission_id}: {str(e)}")
@@ -129,6 +135,7 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
+    # Auth Check
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -137,6 +144,7 @@ async def start_mission(
 
     mission_id = str(uuid.uuid4())[:8]
     
+    # Init storage
     MissionManager.missions[mission_id] = {
         "status": "running",
         "stream_url": None, 
@@ -164,7 +172,7 @@ async def get_mission_status(
          raise HTTPException(status_code=401, detail="Unauthorized")
 
     if mission_id not in MissionManager.missions:
-        raise HTTPException(status_code=404, detail="Mission expired or not found")
+        raise HTTPException(status_code=404, detail="Mission ID invalid")
         
     return MissionManager.missions[mission_id]
 
