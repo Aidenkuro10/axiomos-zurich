@@ -5,9 +5,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version SÉQUENTIELLE (Plan Free Friendly).
-    1. Capture l'image et attend la fin (Call bloquant).
-    2. Lance l'analyse ensuite pour ne pas saturer le CPU de Render.
+    Orchestrateur LuxSoft - Version STARTER-POWERED.
+    Optimisé pour capturer Chrono24 même avec des chargements lents.
     """
     token = get_apify_token()
     if not token:
@@ -17,21 +16,23 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     client = ApifyClient(token)
 
     try:
-        log(f"Initiating LuxSoft Sequence for {url}...", "INFO", shared_storage, mission_id)
+        log(f"Initiating High-Res Sequence for {url}...", "INFO", shared_storage, mission_id)
 
-        # --- ÉTAPE 1 : CAPTURE VISUELLE BLOQUANTE ---
-        log("Step 1/2: Establishing visual uplink...", "ACTION", shared_storage, mission_id)
+        # --- ÉTAPE 1 : CAPTURE VISUELLE ROBUSTE ---
+        log("Step 1/2: Establishing visual uplink (Wait for Render/Apify sync)...", "ACTION", shared_storage, mission_id)
         
-        # .call() attend que l'acteur ait fini de s'exécuter
+        # On force l'acteur à être patient pour éviter le "0 requests succeeded"
         shot_run = client.actor("apify/screenshot-url").call(
             run_input={
                 "url": str(url),
-                "waitUntil": "load",
+                "waitUntil": "networkidle2", # Attend que toutes les images soient chargées
                 "width": 1280,
                 "height": 720,
-                "saveScreenshot": True
+                "delay": 7000, # 7 secondes d'attente forcée pour laisser Chrono24 s'afficher
+                "saveScreenshot": True,
+                "useChrome": True
             },
-            memory_mbytes=1024
+            memory_mbytes=2048 # On monte en RAM sur Apify pour un rendu propre
         )
         
         shot_store_id = shot_run.get("defaultKeyValueStoreId")
@@ -39,12 +40,12 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = stream_url
-            log(f"🚀 VISUAL UPLINK READY", "SUCCESS", shared_storage, mission_id)
+            log(f"🚀 VISUAL UPLINK STABILIZED", "SUCCESS", shared_storage, mission_id)
 
-        # Petit répit pour le processeur de Render
-        time.sleep(3)
+        # Répit minimal - Le Plan Starter encaisse mieux les transitions
+        time.sleep(2)
 
-        # --- ÉTAPE 2 : ANALYSE DE MARCHÉ ---
+        # --- ÉTAPE 2 : ANALYSE DE MARCHÉ PROFONDE ---
         log("Step 2/2: Starting deep market analysis...", "INFO", shared_storage, mission_id)
         
         run_input = {
@@ -52,11 +53,10 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             "query": str(goal),
             "maxPagesPerCrawl": 5, 
             "proxyConfiguration": {"useApifyProxy": True},
-            "saveScreenshot": False, # Désactivé pour économiser de la RAM/CPU
+            "saveScreenshot": False,
             "useChrome": True
         }
 
-        # On utilise également .call() ici pour assurer une exécution propre
         analysis_run = client.actor("apify/rag-web-browser").call(
             run_input=run_input,
             memory_mbytes=2048
