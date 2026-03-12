@@ -8,8 +8,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version IMGBB BYPASS + DIAGNOSTIC.
-    Capture l'image, l'upload sur ImgBB et fournit une URL publique directe.
+    Orchestrateur LuxSoft - Version IMGBB BYPASS + FIX OUTPUT.
+    Capture l'image via le standard OUTPUT d'Apify pour garantir la récupération.
     """
     token = get_apify_token()
     if not token:
@@ -33,28 +33,27 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         # ---------------------------------------------------------
         log("Capturing live viewport...", "ACTION", shared_storage, mission_id)
         
+        # On retire 'saveAsCustomKey' pour laisser Apify utiliser 'OUTPUT'
         visual_run = client.actor("apify/screenshot-url").call(
             run_input={
                 "url": str(url),
                 "waitUntil": "load",
                 "width": 1280,
-                "height": 720,
-                "saveAsCustomKey": f"view_{mission_id}"
+                "height": 720
             },
             memory_mbytes=1024
         )
         
-        # Petit délai de sécurité pour laisser le temps au stockage Apify de se stabiliser
-        time.sleep(2)
+        # Petit délai de sécurité pour la propagation du store
+        time.sleep(1)
         
         # ---------------------------------------------------------
-        # 2. RÉCUPÉRATION ET UPLOAD VERS IMGBB
+        # 2. RÉCUPÉRATION (VIA CLÉ 'OUTPUT') ET UPLOAD IMGBB
         # ---------------------------------------------------------
         v_store_id = visual_run.get("defaultKeyValueStoreId")
-        record_key = f"view_{mission_id}"
         
-        log(f"Fetching record {record_key} from store {v_store_id}...", "INFO", shared_storage, mission_id)
-        record = client.key_value_store(v_store_id).get_record(record_key)
+        log(f"Fetching default record 'OUTPUT' from store {v_store_id}...", "INFO", shared_storage, mission_id)
+        record = client.key_value_store(v_store_id).get_record("OUTPUT")
         
         if record and imgbb_key:
             log("Record found. Starting CDN upload...", "ACTION", shared_storage, mission_id)
@@ -75,9 +74,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 log(f"❌ ImgBB API Error: {res.text}", "ERROR", shared_storage, mission_id)
         else:
             if not record:
-                log(f"❌ Record '{record_key}' not found in store", "ERROR", shared_storage, mission_id)
-            if not imgbb_key:
-                log("❌ Upload skipped: No API Key", "ERROR", shared_storage, mission_id)
+                log(f"❌ Record 'OUTPUT' not found in Apify Store", "ERROR", shared_storage, mission_id)
 
         # ---------------------------------------------------------
         # 3. EXTRACTION DES DONNÉES (RAW-HTTP)
