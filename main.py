@@ -45,7 +45,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.3.1_FINAL_FIX",
+        "version": "2.4.0_DOUBLE_UPLINK",
         "active_missions": list(MissionManager.missions.keys())
     }
 
@@ -53,28 +53,26 @@ def read_root():
 async def proxy_live_image(mission_id: str):
     """
     Relais Serveur -> Client avec Fallback Visuel.
+    Supporte la transition entre le screenshot rapide et le screenshot final.
     """
-    # Log de diagnostic RAM
-    print(f"DEBUG PROXY: Request for {mission_id}. RAM State: {list(MissionManager.missions.keys())}")
-
+    # Log de diagnostic RAM pour vérifier la présence de la session
     if mission_id not in MissionManager.missions:
-        return Response(status_code=404, content=f"Mission {mission_id} expired")
+        print(f"DEBUG PROXY: Request for {mission_id} - NOT FOUND")
+        return Response(status_code=404, content="Mission expired")
     
     stream_url = MissionManager.missions[mission_id].get("stream_url")
     if not stream_url:
         return Response(status_code=204)
 
     try:
-        # On tente de récupérer le screenshot réel
+        # Tentative de récupération du visuel Apify
         resp = requests.get(stream_url, timeout=5)
         
         if resp.status_code == 200:
             return Response(content=resp.content, media_type="image/png")
         
-        # SI APIFY N'EST PAS PRÊT (404) : 
-        # On sert l'image d'attente LuxSoft au lieu d'un écran noir
+        # Fallback si l'image n'est pas encore prête sur le store d'Apify
         elif resp.status_code == 404:
-            print(f"DEBUG PROXY: Apify store still warming up for {mission_id}")
             idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
             idle_resp = requests.get(idle_url)
             return Response(content=idle_resp.content, media_type="image/jpeg")
@@ -85,22 +83,24 @@ async def proxy_live_image(mission_id: str):
     return Response(status_code=404)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline LuxSoft avec persistence étendue."""
+    """Pipeline LuxSoft avec exécution de l'automatisation et analyse."""
     loop = asyncio.get_event_loop()
     try:
         storage = MissionManager.missions
         shared_mem = storage[mission_id]
         
-        # Phase 1: Navigation et Capture (L'apify_client gère le sleep interne)
+        # Phase 1: Automatisation (Double Uplink : Screenshot rapide + RAG Analysis)
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, storage, mission_id
         )
 
         if dataset_id:
             shared_mem["status"] = "analyzing"
+            # Phase 2: Analyse des données extraites
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, storage, mission_id
             )
+            # Phase 3: Construction du rapport stratégique
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, storage
             )
@@ -110,8 +110,8 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             shared_mem["status"] = "failed"
         
         # --- PHASE DE PERSISTENCE ---
-        # On garde les données 1 heure pour éviter les 404 lors du débriefing
-        print(f"MISSION {mission_id} COMPLETED. DATA PERSISTENCE ACTIVE.")
+        # On maintient les données en RAM pour le polling post-mission (1 heure)
+        print(f"MISSION {mission_id} PERSISTENCE ENABLED")
         await asyncio.sleep(3600) 
             
     except Exception as e:
@@ -125,6 +125,7 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
+    # Validation de l'authentification interne
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
