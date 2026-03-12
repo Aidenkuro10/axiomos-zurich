@@ -56,7 +56,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "2.7.0_LIVE_TELEMETRY_FIX",
+        "version": "2.8.0_STABLE_VIEW_FINAL",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -64,8 +64,8 @@ def read_root():
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    Proxy Ultra-Résilient.
-    Force la récupération de l'image avec bypass de cache pour le mode Playwright.
+    Proxy Ultra-Résilient optimisé pour la clé fixe 'latest_view'.
+    Bypasse intégralement le cache d'Apify et du navigateur.
     """
     mission = load_mission(mission_id)
     if not mission:
@@ -81,34 +81,33 @@ async def proxy_live_image(mission_id: str):
         except:
             return Response(status_code=204)
 
-    # On force Apify à nous donner la version la plus fraîche du screenshot
-    # en ajoutant un paramètre de temps à l'URL source.
+    # Reconstruction de l'URL pour forcer la clé latest_view et bypasser le cache
     token = get_apify_token()
-    clean_url = stream_url.split('?')[0]
-    burst_url = f"{clean_url}?token={token}&disableRedirect=true&noCache={int(time.time())}"
+    clean_base = stream_url.split('?')[0]
+    # On s'assure que l'URL pointe bien vers latest_view avec un cache-buster temporel
+    burst_url = f"{clean_base}?token={token}&disableRedirect=true&noCache={time.time_ns()}"
 
-    for attempt in range(2):
-        try:
-            resp = requests.get(burst_url, timeout=4)
-            if resp.status_code == 200 and len(resp.content) > 1000:
-                return Response(
-                    content=resp.content, 
-                    media_type="image/png",
-                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
-                )
-            await asyncio.sleep(0.5)
-        except Exception:
-            await asyncio.sleep(0.5)
-
-    # Fallback vers l'image d'attente
     try:
-        fallback_resp = requests.get(idle_url)
-        return Response(content=fallback_resp.content, media_type="image/jpeg")
-    except:
-        return Response(status_code=404)
+        # Timeout très court : si l'image n'est pas prête, on ne bloque pas le thread
+        resp = requests.get(burst_url, timeout=3)
+        if resp.status_code == 200 and len(resp.content) > 500:
+            return Response(
+                content=resp.content, 
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0"
+                }
+            )
+    except Exception as e:
+        print(f"Proxy Uplink Syncing... {e}")
+
+    # Fallback silencieux (évite l'affichage d'erreur console côté client)
+    return Response(status_code=204)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration unifié."""
+    """Pipeline d'orchestration Dual-Core."""
     loop = asyncio.get_event_loop()
     
     # On initialise avec les données en DB
@@ -116,8 +115,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
     shared_ref = {mission_id: initial_state}
 
     try:
-        # Phase 1: Capture Visuelle et Télémétrie Live
-        # L'apify_client doit maintenant utiliser une boucle pour updater shared_ref
+        # Phase 1: Capture Visuelle et Extraction Unifiée (Dual-Core)
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
@@ -129,30 +127,30 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             current_state["status"] = "analyzing"
             save_mission(mission_id, current_state)
 
-            # Phase 2: Analyse
+            # Phase 2: Analyse du Dataset
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, shared_ref, mission_id
             )
             
-            # Phase 3: Rapport
+            # Phase 3: Génération du Rapport Stratégique
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, shared_ref
             )
             
-            # On recharge une dernière fois pour ne rien perdre des derniers logs
+            # Finalisation et Persistance
             final_state = load_mission(mission_id)
             final_state["report"] = report.dict()
             final_state["status"] = "completed"
             save_mission(mission_id, final_state)
             
-            print(f"--- SUCCESS: Mission {mission_id} finished ---")
+            print(f"--- SUCCESS: Mission {mission_id} completed ---")
         else:
             final_state = load_mission(mission_id)
             final_state["status"] = "failed"
             save_mission(mission_id, final_state)
             
     except Exception as e:
-        print(f"💥 Critical Failure {mission_id}: {str(e)}")
+        print(f"💥 Runner Critical Failure {mission_id}: {str(e)}")
         current = load_mission(mission_id)
         if current:
             current["status"] = "error"
@@ -175,7 +173,7 @@ async def start_mission(
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Launching Agent Core."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Initializing Dual-Core Agents."}],
         "report": None
     }
     save_mission(mission_id, initial_data)

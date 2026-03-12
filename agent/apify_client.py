@@ -5,9 +5,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version DUAL-CORE "ULTRA-LIGHT".
-    - Visualiseur : 1024MB (Priorité au rendu graphique)
-    - Extracteur : 512MB (Mode raw-http pour ne consommer aucune RAM navigateur)
+    Orchestrateur LuxSoft - Version DUAL-CORE "STABLE-VIEW".
+    Force une clé de stockage fixe pour l'image afin d'éliminer l'écran noir.
     """
     token = get_apify_token()
     if not token:
@@ -20,32 +19,33 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         log(f"Uplink Initialized. Deploying Agents for {url}...", "INFO", shared_storage, mission_id)
         
         # ---------------------------------------------------------
-        # 1. LANCEMENT DU VISUALISEUR (Priorité Image)
+        # 1. LANCEMENT DU VISUALISEUR (Clé Fixe Forcée)
         # ---------------------------------------------------------
-        # On lui donne 1024MB pour être sûr que le moteur graphique ne crash pas.
+        # On utilise saveAsCustomKey pour que l'URL soit prédictible immédiatement.
         visual_run = client.actor("apify/screenshot-url").start(
             run_input={
                 "url": str(url),
-                "waitUntil": "domcontentloaded", 
+                "waitUntil": "load", 
                 "width": 1024,
                 "height": 576,
-                "delay": 1500 
+                "delay": 0,
+                "saveAsCustomKey": "latest_view" # LA CLÉ MAGIQUE
             },
             memory_mbytes=1024
         )
         
         visual_store_id = visual_run.get("defaultKeyValueStoreId")
-        stream_url = f"https://api.apify.com/v2/key-value-stores/{visual_store_id}/records/OUTPUT?token={token}&disableRedirect=true"
+        # L'URL pointe maintenant vers la clé fixe 'latest_view'
+        stream_url = f"https://api.apify.com/v2/key-value-stores/{visual_store_id}/records/latest_view?token={token}&disableRedirect=true"
         
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = stream_url
-            log(f"🚀 VISUAL UPLINK ESTABLISHED (1024MB)", "SUCCESS", shared_storage, mission_id)
+            log(f"🚀 VISUAL UPLINK ESTABLISHED", "SUCCESS", shared_storage, mission_id)
 
         # ---------------------------------------------------------
-        # 2. LANCEMENT DE L'AGENT DATA (Mode Économique)
+        # 2. LANCEMENT DE L'AGENT DATA (Mode Ultra-Léger)
         # ---------------------------------------------------------
-        # 'raw-http' télécharge le code sans ouvrir de navigateur : gain de RAM immense.
-        log("Deploying Data Specialist (Raw-HTTP Mode)...", "ACTION", shared_storage, mission_id)
+        log("Deploying Data Specialist (Raw-HTTP)...", "ACTION", shared_storage, mission_id)
         data_run = client.actor("apify/rag-web-browser").start(
             run_input={
                 "startUrls": [{"url": str(url)}],
@@ -83,7 +83,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
         if status == "SUCCEEDED":
             dataset_id = details.get("defaultDatasetId")
-            log(f"✅ Data Mission successful.", "SUCCESS", shared_storage, mission_id)
+            log(f"✅ Data Extraction successful.", "SUCCESS", shared_storage, mission_id)
             return dataset_id
         
         log(f"❌ Data Specialist failed ({status})", "ERROR", shared_storage, mission_id)
