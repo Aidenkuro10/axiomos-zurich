@@ -1,13 +1,13 @@
 import time
 from apify_client import ApifyClient
+from apify_client._errors import ApifyApiError
 from config.secrets import get_apify_token
 from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Drives the Apify RAG Web Browser Actor.
-    Optimized for 'Stop-Motion Video Mode': forces periodic screenshots
-    and provides a direct link to the Key-Value Store record.
+    Orchestrateur LuxSoft pour l'Actor Apify RAG Web Browser.
+    Gère la capture visuelle Stop-Motion et la synchronisation de télémétrie.
     """
     token = get_apify_token()
     if not token:
@@ -16,45 +16,51 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
     client = ApifyClient(token)
     
-    # Configuration for LuxSoft Luxury Arbitrage - Stop-Motion Optimized
+    # Configuration Robuste - Typage strict pour le schéma Apify
     run_input = {
-        "startUrls": [{"url": url}],
-        "query": goal,
-        "maxPagesPerCrawl": 3,           
-        "dynamicContentWaitSecs": 10,    
+        "startUrls": [{"url": str(url)}],
+        "query": str(goal),
+        "maxPagesPerCrawl": 3,
+        "dynamicContentWaitSecs": 10,
         "proxyConfiguration": {"useApifyProxy": True},
         "outputFormat": "markdown",
         "viewPort": {"width": 1280, "height": 720},
-        "saveScreenshot": True, # FORCE l'agent à prendre des photos
+        "saveScreenshot": True,  # Indispensable pour le Stop-Motion
         "useChrome": True,
         "pageLoadTimeoutSecs": 60,
-        "maxConcurrency": 1,             
+        "maxConcurrency": 1,
         "initialConcurrency": 1,
-        "waitForSelector": ".article-item, .listing-item",
-        "postCrawlingWaitSecs": 5       
+        "postCrawlingWaitSecs": 5
     }
 
     try:
         log(f"📡 Initiating Apify handshake for {url}...", "INFO", shared_storage, mission_id)
         
-        # Start the actor (non-blocking)
-        run = client.actor("apify/rag-web-browser").start(run_input=run_input)
+        # Initialisation de l'Actor
+        actor_call = client.actor("apify/rag-web-browser")
+        run = actor_call.start(run_input=run_input)
+        
+        if not run or "id" not in run:
+            raise ValueError("Failed to retrieve Run ID from Apify.")
+
         run_id = run["id"]
 
-        # NOUVELLE LOGIQUE : On pointe vers le Key-Value Store pour l'image
-        # Ce fichier 'screenshot.png' est mis à jour par l'acteur durant son run.
+        # Construction de l'URL du Key-Value Store pour l'image Stop-Motion
+        # Cette URL est immuable durant le run et sera rafraîchie par le cache-buster du frontend
         stream_url = f"https://api.apify.com/v2/runs/{run_id}/key-value-store/records/screenshot.png?token={token}"
         
         if shared_storage and mission_id in shared_storage:
+            # Injection immédiate pour le polling du frontend
             shared_storage[mission_id]["stream_url"] = stream_url
             log(f"🚀 Visual uplink synchronized. Agent ID: {run_id}", "ACTION", shared_storage, mission_id)
 
-        log(f"🕵️ Agent is navigating and capturing visual evidence...", "INFO", shared_storage, mission_id)
+        log("🕵️ Agent is navigating and capturing visual evidence...", "INFO", shared_storage, mission_id)
         
-        # Wait for the actor to finish
-        final_run_result = client.run(run_id).wait_for_finish(wait_secs=500)
+        # Blocage contrôlé avec timeout étendu pour la navigation
+        run_handle = client.run(run_id)
+        final_run_result = run_handle.wait_for_finish(wait_secs=500)
         
-        # Petit délai pour s'assurer que le dernier screenshot est bien uploadé
+        # Délai de grâce pour la persistence du dernier screenshot
         time.sleep(5)
 
         if final_run_result and "defaultDatasetId" in final_run_result:
@@ -65,7 +71,9 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             log("❌ Apify Actor failed to return a valid dataset.", "ERROR", shared_storage, mission_id)
             return None
             
+    except ApifyApiError as api_err:
+        log(f"💥 Apify API Exception: {api_err.message}", "ERROR", shared_storage, mission_id)
+        return None
     except Exception as e:
-        error_msg = str(e)
-        log(f"❌ Apify failure: {error_msg}", "ERROR", shared_storage, mission_id)
+        log(f"❌ Internal System Error: {str(e)}", "ERROR", shared_storage, mission_id)
         return None
