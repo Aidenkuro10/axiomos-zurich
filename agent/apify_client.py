@@ -7,8 +7,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Version LUXSOFT - VISUAL BULLDOZER.
-    Force l'utilisation du Web Scraper pour garantir un rendu Chrome et des screenshots.
+    Version LUXSOFT - VISUAL BULLDOZER (STABLE).
+    Utilise le Web Scraper avec une fonction d'attente universelle pour la vidéo.
     """
     token = get_apify_token()
     if not token:
@@ -24,16 +24,26 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         run_input = {
             "startUrls": [{"url": str(url)}],
             "runMode": "DEVELOPMENT",
-            # Ce script force l'agent à rester sur la page et à simuler une activité
+            # Script corrigé : utilise une promesse pour l'attente (évite le crash undefined)
             "pageFunction": """async function pageFunction(context) {
                 const { page, log } = context;
+                
+                // Helper d'attente universel
+                const wait = (ms) => new Promise(res => setTimeout(res, ms));
+
                 log.info('Browser Uplink Stable. Waiting for render...');
-                await page.waitForTimeout(7000);
+                await wait(8000);
+                
                 log.info('Executing telemetry scroll...');
-                await page.evaluate(() => window.scrollBy(0, 400));
-                await page.waitForTimeout(8000);
+                await page.evaluate(() => window.scrollBy(0, 500));
+                
+                await wait(8000);
                 log.info('Finalizing capture...');
-                return { title: await page.title(), url: page.url() };
+                
+                return { 
+                    title: await page.title(), 
+                    url: page.url() 
+                };
             }""",
             "proxyConfiguration": {"useApifyProxy": True},
             "browserLog": True,
@@ -43,7 +53,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
         data_run = client.actor("apify/web-scraper").start(
             run_input=run_input,
-            memory_mbytes=2048 # RAM max pour éviter les saccades visuelles
+            memory_mbytes=2048 
         )
         d_run_id = data_run["id"]
 
@@ -63,29 +73,23 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 try:
                     check_url = f"https://api.apify.com/v2/runs/{d_run_id}/screenshot?token={token}"
                     r = requests.get(check_url, timeout=5)
+                    # Si l'image est consistante (> 1000 octets), on débloque l'affichage
                     if r.status_code == 200 and len(r.content) > 1000:
                         if shared_storage is not None and mission_id in shared_storage:
-                            # ON DÉBLOQUE LE FRONTEND
                             shared_storage[mission_id]["run_id"] = d_run_id 
                             visual_ready = True
                             log("Satellite Uplink: VISUAL STREAM ACTIVE.", "SUCCESS", shared_storage, mission_id)
                 except:
                     pass
 
-            # BACKUP URL
-            if shared_storage is not None and mission_id in shared_storage:
-                ts = int(time.time())
-                shared_storage[mission_id]["stream_url"] = f"https://api.apify.com/v2/runs/{d_run_id}/screenshot?token={token}&v={ts}"
-
-            # LOGS NAVIGATEUR
+            # MISE À JOUR DU LOGS DU NAVIGATEUR
             full_log = client.log(d_run_id).get()
             if full_log:
                 new_logs = full_log[last_log_offset:]
                 if new_logs.strip():
                     for line in new_logs.strip().split('\n'):
                         line_content = line.strip()
-                        # On filtre pour voir ce que Chrome fait vraiment
-                        if any(x in line_content.lower() for x in ["info", "scroll", "navigation", "page"]):
+                        if any(x in line_content.lower() for x in ["info", "scroll", "navigation", "render", "capture"]):
                             log(f"[BROWSER] {line_content}", "INFO", shared_storage, mission_id)
                 last_log_offset = len(full_log)
 
