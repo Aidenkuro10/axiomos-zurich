@@ -8,9 +8,9 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version BULLDOZER.
-    Capture le visuel et les données en parallèle.
-    Boucle de persistance étendue (30s) pour garantir la récupération de l'image.
+    Orchestrateur LuxSoft - Version UNIFIÉE (Web-Scraper).
+    Fusionne capture visuelle et extraction de données.
+    Bypasse totalement les problèmes de Key-Value Store d'Apify.
     """
     token = get_apify_token()
     if not token:
@@ -18,110 +18,84 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         return None
 
     client = ApifyClient(token)
-    
-    # Diagnostic Clé ImgBB (Variable d'environnement Render)
     imgbb_key = os.environ.get("IMGBB_API_KEY")
-    if not imgbb_key:
-        log("❌ IMGBB_API_KEY missing from Render Environment", "ERROR", shared_storage, mission_id)
-    else:
-        log(f"🔎 Key detected (Prefix: {imgbb_key[:4]}...)", "INFO", shared_storage, mission_id)
 
     try:
-        log(f"Mission {mission_id}: Initiating DUAL-CORE execution...", "INFO", shared_storage, mission_id)
+        log(f"Mission {mission_id}: Launching Unified Extraction Agent...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DU VISUALISEUR (Mode rapide 'load')
-        visual_run = client.actor("apify/screenshot-url").start(
-            run_input={
-                "url": str(url),
-                "waitUntil": "load",
-                "width": 1280,
-                "height": 720,
-                "delay": 1000 
-            }
-        )
-        v_run_id = visual_run["id"]
-
-        # 2. LANCEMENT DE L'AGENT DATA (Extraction Core)
-        log("Deploying Extraction Core...", "ACTION", shared_storage, mission_id)
-        data_run = client.actor("apify/rag-web-browser").start(
+        # On utilise Web Scraper qui est le plus robuste pour le JS et les screenshots
+        run = client.actor("apify/web-scraper").start(
             run_input={
                 "startUrls": [{"url": str(url)}],
-                "query": str(goal),
-                "maxPagesPerCrawl": 1,
-                "scrapingTool": "raw-http",
+                "runMode": "DEVELOPMENT", # Plus rapide pour les tests
+                "pageFunction": """
+                async def pageFunction(context) {
+                    const { page, request, log } = context;
+                    
+                    // Attente de stabilisation de la page
+                    await page.waitForTimeout(4000);
+                    
+                    // Capture du screenshot directement en Buffer
+                    const screenshot = await page.screenshot({ fullPage: false, type: 'png' });
+                    
+                    // Retour des données + Image en Base64
+                    return {
+                        url: request.url,
+                        screenshotB64: screenshot.toString('base64'),
+                        pageTitle: await page.title()
+                    };
+                }
+                """,
                 "proxyConfiguration": {"useApifyProxy": True}
-            },
-            memory_mbytes=512
+            }
         )
-        d_run_id = data_run["id"]
-
-        # 3. BOUCLE DE TÉLÉMÉTRIE MIXTE
-        last_log_offset = 0
-        visual_secured = False
         
+        run_id = run["id"]
+        last_offset = 0
+
         while True:
-            # État de l'agent Data (Indicateur de boucle principale)
-            d_details = client.run(d_run_id).get()
-            d_status = d_details.get("status")
+            details = client.run(run_id).get()
+            status = details.get("status")
             
-            # GESTION RENFORCÉE DE L'IMAGE
-            if not visual_secured:
-                v_details = client.run(v_run_id).get()
-                v_status = v_details.get("status")
-                
-                if v_status == "SUCCEEDED":
-                    v_store_id = v_details.get("defaultKeyValueStoreId")
-                    
-                    # --- BOUCLE BULLDOZER : 15 TENTATIVES (30 SECONDES) ---
-                    record = None
-                    for i in range(15):
-                        record = client.key_value_store(v_store_id).get_record("OUTPUT")
-                        if record and record.get('value'):
-                            break
-                        log(f"Syncing visual store (attempt {i+1}/15)...", "INFO", shared_storage, mission_id)
-                        time.sleep(2)
-                    
-                    if record and imgbb_key:
-                        log("Viewport found. Syncing to ImgBB...", "ACTION", shared_storage, mission_id)
-                        img_b64 = base64.b64encode(record['value']).decode('utf-8')
-                        res = requests.post(
-                            "https://api.imgbb.com/1/upload", 
-                            data={"key": imgbb_key, "image": img_b64},
-                            timeout=20
-                        )
-                        if res.status_code == 200:
-                            public_url = res.json()['data']['url']
-                            if shared_storage and mission_id in shared_storage:
-                                shared_storage[mission_id]["stream_url"] = public_url
-                                log(f"🚀 VISUAL UPLINK SECURED", "SUCCESS", shared_storage, mission_id)
-                                visual_secured = True
-                                break # On sort de la boucle de retry visuel
-                    else:
-                        log("⚠️ Visual capture timeout: Output remained empty after 30s.", "WARNING", shared_storage, mission_id)
-                        visual_secured = True 
+            # Streaming des logs pour voir ce qu'il fait
+            f_log = client.log(run_id).get()
+            if f_log:
+                new = f_log[last_offset:]
+                if new.strip():
+                    for line in new.strip().split('\n'):
+                        log(f"[CORE] {line.strip()}", "INFO", shared_storage, mission_id)
+                    last_offset = len(f_log)
 
-            # Récupération et affichage des logs de l'agent Data
-            full_log = client.log(d_run_id).get()
-            if full_log:
-                new_logs = full_log[last_log_offset:]
-                if new_logs.strip():
-                    for line in new_logs.strip().split('\n'):
-                        if line.strip():
-                            log(f"[AGENT] {line.strip()}", "INFO", shared_storage, mission_id)
-                    last_log_offset = len(full_log)
-
-            if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
+            if status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
-            
             time.sleep(2)
 
-        if d_status == "SUCCEEDED":
-            dataset_id = d_details.get("defaultDatasetId")
-            log(f"✅ Mission successful for session {mission_id}.", "SUCCESS", shared_storage, mission_id)
-            return dataset_id
+        if status == "SUCCEEDED":
+            # 1. RÉCUPÉRATION DU SCREENSHOT DANS LE DATASET
+            items = client.dataset(details["defaultDatasetId"]).list_items().items
+            if items and "screenshotB64" in items[0] and imgbb_key:
+                log("Uplink established. Syncing visual buffer to ImgBB...", "ACTION", shared_storage, mission_id)
+                
+                res = requests.post(
+                    "https://api.imgbb.com/1/upload",
+                    data={"key": imgbb_key, "image": items[0]["screenshotB64"]},
+                    timeout=25
+                )
+                
+                if res.status_code == 200:
+                    public_url = res.json()['data']['url']
+                    if shared_storage and mission_id in shared_storage:
+                        shared_storage[mission_id]["stream_url"] = public_url
+                        log(f"🚀 VISUAL UPLINK SECURED", "SUCCESS", shared_storage, mission_id)
+                else:
+                    log(f"ImgBB Error: {res.text}", "ERROR", shared_storage, mission_id)
+
+            # 2. LANCEMENT DE L'AGENT DATA (RAG) SUR LE CONTENU
+            # On réutilise le dataset pour que l'analyzer puisse travailler
+            return details.get("defaultDatasetId")
         
         return None
             
     except Exception as e:
-        log(f"💥 Critical Failure: {str(e)}", "ERROR", shared_storage, mission_id)
+        log(f"💥 Unified Agent Failure: {str(e)}", "ERROR", shared_storage, mission_id)
         return None
