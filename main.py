@@ -60,7 +60,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.6.0_STABLE_PROXY",
+        "version": "3.7.0_FINAL_DEMO_SYNC",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -68,10 +68,10 @@ def read_root():
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    PROXY ACTIF: Télécharge l'image depuis Apify et la sert en direct.
+    PROXY ACTIF: Télécharge l'image depuis Apify et la sert en direct au frontend.
     Bypasse les sécurités CORS en renvoyant toujours un code 200.
     """
-    # Priorité absolue à la RAM pour le live
+    # Priorité absolue à la RAM pour la réactivité du live
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         return Response(status_code=404)
@@ -80,21 +80,23 @@ async def proxy_live_image(mission_id: str):
     
     if stream_url and "apify.com" in stream_url:
         try:
-            # On aspire l'image côté serveur
-            resp = requests.get(stream_url, timeout=5)
-            if resp.status_code == 200:
-                # On renvoie les octets binaires (Code 200)
+            # On laisse plus de temps à Apify pour répondre (10s)
+            resp = requests.get(stream_url, timeout=10)
+            if resp.status_code == 200 and len(resp.content) > 500:
+                # On renvoie les octets binaires (Code 200 OK)
                 return Response(content=resp.content, media_type="image/jpeg")
+            else:
+                print(f"DEBUG PROXY: Apify not ready yet (Code {resp.status_code})")
         except Exception as e:
             print(f"DEBUG PROXY ERROR: {str(e)}")
 
     # ANTI-307: Au lieu de RedirectResponse, on renvoie un pixel transparent (Code 200)
-    # Cela évite que le navigateur ne bloque la requête.
+    # Cela évite que le navigateur ne bloque la requête d'image.
     transparent_pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\x2d\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
     return Response(content=transparent_pixel, media_type="image/png")
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration LuxSoft."""
+    """Pipeline d'orchestration LuxSoft pour le Hackathon."""
     loop = asyncio.get_event_loop()
     
     try:
@@ -104,19 +106,19 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             executor, launch_apify_automation, url, goal, active_missions, mission_id
         )
         
-        # Persistance immédiate après Phase 1
+        # Persistance immédiate après Phase 1 (URL incluse)
         save_mission(mission_id, active_missions[mission_id])
 
         if dataset_id:
             active_missions[mission_id]["status"] = "analyzing"
             save_mission(mission_id, active_missions[mission_id])
 
-            # Phase 2: Analyse
+            # Phase 2: Analyse automatisée
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, active_missions, mission_id
             )
             
-            # Phase 3: Rapport
+            # Phase 3: Synthèse du Rapport final
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, active_missions
             )
@@ -131,7 +133,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             save_mission(mission_id, active_missions[mission_id])
             
     except Exception as e:
-        print(f"💥 Runner Failure {mission_id}: {str(e)}")
+        print(f"💥 Runner Critical Failure {mission_id}: {str(e)}")
         if mission_id in active_missions:
             active_missions[mission_id]["status"] = "error"
             save_mission(mission_id, active_missions[mission_id])
@@ -142,6 +144,7 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
+    # Authentification stricte
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -153,7 +156,7 @@ async def start_mission(
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Launching Autonomous Agent..."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Deploying Agent. Synchronizing Telemetry..."}],
         "report": None
     }
     
@@ -174,6 +177,7 @@ async def get_mission_status(
     if received != expected:
          raise HTTPException(status_code=401, detail="Unauthorized")
 
+    # Lecture RAM prioritaire pour éviter les lags SQLite
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
@@ -182,4 +186,5 @@ async def get_mission_status(
 
 if __name__ == "__main__":
     import uvicorn
+    # Configuration optimisée pour le plan Starter de Render
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
