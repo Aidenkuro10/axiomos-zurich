@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version STRATÉGIQUE (SUBMARINER ONLY).
-    Maintient le flux d'images live et filtre drastiquement le bruit.
+    Orchestrateur LuxSoft - Version STRATÉGIQUE (ANTI-DOUBLONS).
+    Filtre les Submariner uniques et maintient le flux d'images live.
     """
     token = get_apify_token()
     if not token:
@@ -30,45 +30,47 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     const { page, log } = context;
                     await page.setViewport({ width: 1280, height: 800 });
                     
-                    // --- 1. CONTOURNEMENT COOKIES ---
+                    // --- VERROU DE MÉMOIRE POUR ÉVITER LES DOUBLONS ---
+                    const sentItems = new Set();
+
                     try {
                         await page.evaluate(() => {
                             const btn = Array.from(document.querySelectorAll('button'))
                                 .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter') || b.innerText.includes('Accept'));
                             if (btn) btn.click();
                         });
-                    } catch (e) { log.info('Cookies already handled.'); }
+                    } catch (e) { log.info('Cookies handled.'); }
 
-                    // --- 2. BOUCLE LIVE + EXTRACTION CIBLÉE ---
                     for (let i = 0; i < 12; i++) {
-                        // A. Capture visuelle pour le Dashboard (IMAGE INTACTE)
+                        // A. Capture visuelle (IMAGE INTACTE)
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        // B. EXTRACTION STRATÉGIQUE (FILTRE SUBMARINER)
-                        const visibleItems = await page.evaluate(() => {
+                        // B. EXTRACTION CIBLÉE (FILTRE UNIQUE SUBMARINER)
+                        const visibleItems = await page.evaluate((alreadySent) => {
                             const elements = document.querySelectorAll('div, article, section, li');
-                            const items = [];
-                            // Mots-clés de rejet pour nettoyer le bruit
+                            const foundNow = [];
                             const junk = ['folie', 'seite', 'kategorie', 'rolex uhren', 'preisübersicht'];
 
                             elements.forEach(el => {
                                 const text = el.innerText || "";
                                 const lowerText = text.toLowerCase();
-                                const firstLine = text.split('\\n')[0].trim().toLowerCase();
+                                const firstLine = text.split('\\n')[0].trim();
 
-                                // On ne prend que si "Submariner" est présent et que ce n'est pas du bruit (junk)
-                                const isSubmariner = lowerText.includes('submariner');
-                                const isJunk = junk.some(term => firstLine.includes(term));
-
-                                if (isSubmariner && !isJunk && text.includes('CHF') && text.length < 500 && text.length > 30) {
+                                // Stratégie : Submariner uniquement + prix CHF
+                                if (lowerText.includes('submariner') && text.includes('CHF')) {
                                     const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?CHF/i);
                                     if (priceMatch) {
                                         const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
-                                        // Seuil réaliste pour une Submariner (évite les accessoires)
-                                        if (cleanPrice > 4000) {
-                                            items.push({
-                                                "title": text.split('\\n')[0].substring(0, 60).trim(),
+                                        const itemID = `${firstLine.substring(0,30)}-${cleanPrice}`;
+
+                                        const isJunk = junk.some(term => firstLine.toLowerCase().includes(term));
+
+                                        // On ne prend que si c'est une vraie montre (>4000) et JAMAIS envoyé
+                                        if (cleanPrice > 4000 && !isJunk && !alreadySent.includes(itemID)) {
+                                            foundNow.push({
+                                                "id": itemID,
+                                                "title": firstLine.substring(0, 60),
                                                 "price": cleanPrice,
                                                 "url": el.querySelector('a')?.href || window.location.href,
                                                 "brand": "Rolex",
@@ -78,18 +80,18 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                                     }
                                 }
                             });
-                            // Dédoublonnage
-                            return items.filter((v,i,a)=>a.findIndex(t=>(t.price===v.price && t.title===v.title))===i);
-                        });
+                            return foundNow;
+                        }, Array.from(sentItems));
 
-                        // Envoi immédiat vers le Dataset
+                        // C. Synchronisation et envoi
                         if (visibleItems.length > 0) {
+                            visibleItems.forEach(item => sentItems.add(item.id));
                             await context.pushData(visibleItems);
                         }
 
-                        // C. Scroll fluide
-                        await page.evaluate(() => window.scrollBy(0, 600));
-                        await new Promise(r => setTimeout(r, 1500));
+                        // D. Scroll augmenté pour changer de vue
+                        await page.evaluate(() => window.scrollBy(0, 800));
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                     
                     log.info('Mission de navigation et synchronisation terminée.');
@@ -107,7 +109,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         d_run_id = data_run["id"]
         d_store_id = data_run["defaultKeyValueStoreId"]
 
-        # 2. INJECTION DE L'URL DE NOTRE FLUX
         native_live_url = f"https://api.apify.com/v2/key-value-stores/{d_store_id}/records/VUE_DIRECTE?token={token}"
         
         if shared_storage and mission_id in shared_storage:
@@ -115,7 +116,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             save_mission(mission_id, shared_storage[mission_id])
             log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # 3. MONITORING
         last_log_offset = 0
         while True:
             d_details = client.run(d_run_id).get()

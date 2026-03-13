@@ -8,6 +8,9 @@ from utils.database import load_mission, save_mission
 from services.vector_db import save_opportunity_to_vector_db, ensure_collection_exists
 
 def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, mission_id=None):
+    """
+    Analyseur LuxSoft - Détection d'Anomalies de Marché (-10%).
+    """
     if not dataset_id:
         log("⚠️ No Dataset ID provided.", "ERROR", shared_storage, mission_id)
         return []
@@ -24,7 +27,6 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
         log(f"🔍 Fetching raw data: {dataset_id}", "INFO", shared_storage, mission_id)
         
         raw_items = []
-        # On augmente un peu le retry pour être sûr
         for attempt in range(4):
             response = requests.get(dataset_url)
             if response.status_code == 200:
@@ -37,41 +39,38 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
             log("📭 Dataset empty.", "WARNING", shared_storage, mission_id)
             return []
 
-        processed_opportunities = []
+        # 1. Nettoyage et filtrage des prix réalistes (Submariner > 5000 CHF)
         cleaned_data = []
-
         for item in raw_items:
             price = item.get('price')
-            content = str(item.get('markdown', '') or item.get('text', '') or item.get('title', ''))
-            
             if isinstance(price, str):
                 price = float(re.sub(r"[^0-9.]", "", price))
-
-            # Fallback REGEX plus agressif
-            if not price or price == 0:
-                # Cherche n'importe quel nombre entre 100 et 100000
-                price_match = re.search(r"(\d{1,3}[\s']?\d{3})", content)
-                if price_match:
-                    price = float(price_match.group(1).replace("'", "").replace(" ", ""))
-
-            title = item.get('title') or "Luxury Item"
             
+            # On ignore les bruits de fond (accessoires, faux prix)
+            if not price or price < 4000:
+                continue
+
             cleaned_data.append({
-                "title": title,
-                "price": price or 0,
+                "title": item.get('title') or "Rolex Submariner",
+                "price": price,
                 "url": item.get('url') or "https://www.chrono24.ch",
                 "brand": "Rolex",
                 "condition": "Pre-owned"
             })
 
-        # --- MODIFICATION CRITIQUE : FILTRE PERMISSIF ---
-        valid_prices = [d['price'] for d in cleaned_data if d['price'] > 10] 
+        # 2. Calcul de la moyenne du marché local (sur la page actuelle)
+        valid_prices = [d['price'] for d in cleaned_data]
         avg_price = sum(valid_prices) / len(valid_prices) if valid_prices else 0
         
-        for data in cleaned_data:
-            if data['price'] < 10: # On n'ignore vraiment que le "gratuit"
-                continue
+        # Le seuil d'anomalie est défini par ton goal (-10%)
+        # Exemple: Si moyenne = 10000, anomaly_limit = 9000
+        anomaly_limit = avg_price * (1 - threshold) 
 
+        processed_opportunities = []
+        log(f"📊 Market Avg: {round(avg_price, 2)} CHF | Threshold: {round(anomaly_limit, 2)} CHF", "INFO", shared_storage, mission_id)
+
+        # 3. Identification des anomalies réelles
+        for data in cleaned_data:
             try:
                 opp = MarketOpportunity(
                     model_name=data['title'],
@@ -81,23 +80,24 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
                     condition=data['condition']
                 )
                 
-                # Force le signal HIGH VALUE pour la démo si c'est le seul item
-                # ou s'il est sous la moyenne
-                if len(cleaned_data) == 1 or (avg_price > 0 and opp.listed_price <= avg_price):
+                # --- LOGIQUE D'ANOMALIE -10% ---
+                if opp.listed_price <= anomaly_limit:
                     opp.high_value_signal = True
-                    log(f"🔥 DEAL FOUND: {opp.model_name}", "SUCCESS", shared_storage, mission_id)
+                    log(f"🔥 ANOMALY DETECTED (-10%): {opp.model_name} @ {opp.listed_price} CHF", "SUCCESS", shared_storage, mission_id)
+                    save_opportunity_to_vector_db(opp, mission_id)
                 
                 processed_opportunities.append(opp)
             except:
                 continue
 
+        # 4. Persistence des résultats
         if mission_id:
             m_data = load_mission(mission_id)
             if m_data:
                 m_data["processed_count"] = len(processed_opportunities)
                 save_mission(mission_id, m_data)
 
-        log(f"✅ Analysis complete: {len(processed_opportunities)} items.", "SUCCESS", shared_storage, mission_id)
+        log(f"✅ Analysis complete: {len(processed_opportunities)} Submariners indexed.", "SUCCESS", shared_storage, mission_id)
         return processed_opportunities
 
     except Exception as e:
