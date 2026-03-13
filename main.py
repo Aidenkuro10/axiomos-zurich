@@ -6,7 +6,7 @@ import requests
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
-from fastapi.responses import Response, RedirectResponse
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -38,7 +38,6 @@ class MissionRequest(BaseModel):
     url: str
     goal: str
 
-@app.head("/")
 @app.get("/")
 def read_root():
     """Diagnostic de survie."""
@@ -59,7 +58,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.8.0_DIRECT_UPLINK_TEST",
+        "version": "3.8.0_STABLE_RESTORED",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -67,18 +66,20 @@ def read_root():
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    OBSOLETE: On garde la route pour ne pas casser le code existant,
-    mais on va privilégier le Direct-Link côté Frontend.
+    Relais binaire pour l'affichage des screenshots.
     """
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         return Response(status_code=404)
     
-    stream_url = mission.get("stream_url")
-    if stream_url and "apify.com" in stream_url:
+    run_id = mission.get("run_id")
+    token = get_apify_token()
+    
+    if run_id:
+        apify_url = f"https://api.apify.com/v2/runs/{run_id}/screenshot?token={token}"
         try:
-            resp = requests.get(stream_url, timeout=10)
-            if resp.status_code == 200 and len(resp.content) > 500:
+            resp = requests.get(apify_url, timeout=10)
+            if resp.status_code == 200:
                 return Response(content=resp.content, media_type="image/jpeg")
         except Exception as e:
             print(f"DEBUG PROXY ERROR: {str(e)}")
@@ -92,21 +93,20 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
     
     try:
         # Phase 1: Capture & Extraction
-        # L'agent doit injecter le 'run_id' dans active_missions[mission_id]
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, active_missions, mission_id
         )
         
-        save_mission(mission_id, active_missions[mission_id])
-
         if dataset_id:
             active_missions[mission_id]["status"] = "analyzing"
             save_mission(mission_id, active_missions[mission_id])
 
+            # Phase 2: Analyse
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, active_missions, mission_id
             )
             
+            # Phase 3: Rapport
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, active_missions
             )
@@ -142,7 +142,7 @@ async def start_mission(
     
     initial_data = {
         "status": "running",
-        "run_id": None, # Initialisé à vide, sera rempli par l'agent
+        "run_id": None,
         "stream_url": None, 
         "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Deploying Agent. Synchronizing Telemetry..."}],
         "report": None
@@ -169,7 +169,6 @@ async def get_mission_status(
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
         
-    # On s'assure de renvoyer le run_id pour le direct-link frontend
     return mission
 
 if __name__ == "__main__":

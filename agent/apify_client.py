@@ -7,8 +7,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Version LUXSOFT - VISUAL BULLDOZER (STABLE).
-    Utilise le Web Scraper avec une fonction d'attente universelle pour la vidéo.
+    VERSION LUXSOFT ORIGINALE - RÉTABLIE.
+    Supporte l'extraction et le monitoring visuel par polling.
     """
     token = get_apify_token()
     if not token:
@@ -20,15 +20,12 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Launching VISUAL BULLDOZER...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DU SCRAPER (FORCE LE RENDU NAVIGATEUR)
+        # 1. LANCEMENT DU SCRAPER
         run_input = {
             "startUrls": [{"url": str(url)}],
             "runMode": "DEVELOPMENT",
-            # Script corrigé : utilise une promesse pour l'attente (évite le crash undefined)
             "pageFunction": """async function pageFunction(context) {
                 const { page, log } = context;
-                
-                // Helper d'attente universel
                 const wait = (ms) => new Promise(res => setTimeout(res, ms));
 
                 log.info('Browser Uplink Stable. Waiting for render...');
@@ -57,32 +54,31 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         )
         d_run_id = data_run["id"]
 
-        # PAUSE INITIALE : Laisser Chrome chauffer
-        time.sleep(12)
-
+        # 2. BOUCLE DE MONITORING (Le cœur de la stabilité)
         last_log_offset = 0
         visual_ready = False
-        
-        # 2. BOUCLE DE MONITORING
+        time.sleep(5) # Handshake initial
+
         while True:
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
             
-            # --- VALIDATION VISUELLE ---
+            # Injection immédiate du run_id pour le frontend
+            if shared_storage is not None and mission_id in shared_storage:
+                shared_storage[mission_id]["run_id"] = d_run_id
+
+            # Validation du flux visuel
             if not visual_ready:
                 try:
                     check_url = f"https://api.apify.com/v2/runs/{d_run_id}/screenshot?token={token}"
                     r = requests.get(check_url, timeout=5)
-                    # Si l'image est consistante (> 1000 octets), on débloque l'affichage
                     if r.status_code == 200 and len(r.content) > 1000:
-                        if shared_storage is not None and mission_id in shared_storage:
-                            shared_storage[mission_id]["run_id"] = d_run_id 
-                            visual_ready = True
-                            log("Satellite Uplink: VISUAL STREAM ACTIVE.", "SUCCESS", shared_storage, mission_id)
+                        visual_ready = True
+                        log("Satellite Uplink: VISUAL STREAM ACTIVE.", "SUCCESS", shared_storage, mission_id)
                 except:
                     pass
 
-            # MISE À JOUR DU LOGS DU NAVIGATEUR
+            # Extraction des logs navigateur
             full_log = client.log(d_run_id).get()
             if full_log:
                 new_logs = full_log[last_log_offset:]
@@ -98,7 +94,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             
             time.sleep(4.0)
 
-        # 3. FINALISATION
+        # 3. FINALISATION ET RETOUR DU DATASET
         if d_status == "SUCCEEDED":
             dataset_id = d_details.get("defaultDatasetId")
             log(f"✅ Mission successful. Dataset {dataset_id} ready.", "SUCCESS", shared_storage, mission_id)
