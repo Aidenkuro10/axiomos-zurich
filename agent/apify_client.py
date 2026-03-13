@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version HACKATHON STABLE (LIVE + AUTO-SYNC).
-    Garantit le flux d'images ET l'extraction de données via une recherche sémantique souple.
+    Orchestrateur LuxSoft - Version STRATÉGIQUE (SUBMARINER ONLY).
+    Maintient le flux d'images live et filtre drastiquement le bruit.
     """
     token = get_apify_token()
     if not token:
@@ -39,29 +39,36 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                         });
                     } catch (e) { log.info('Cookies already handled.'); }
 
-                    // --- 2. BOUCLE LIVE + EXTRACTION CONTINUE ---
+                    // --- 2. BOUCLE LIVE + EXTRACTION CIBLÉE ---
                     for (let i = 0; i < 12; i++) {
-                        // A. Capture visuelle pour le Dashboard (TON IMAGE)
+                        // A. Capture visuelle pour le Dashboard (IMAGE INTACTE)
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        // B. EXTRACTION SOUPLE (LE FILET DE PÊCHE)
-                        // On ne cherche plus de classes CSS précises, on cherche du texte avec "CHF"
+                        // B. EXTRACTION STRATÉGIQUE (FILTRE SUBMARINER)
                         const visibleItems = await page.evaluate(() => {
                             const elements = document.querySelectorAll('div, article, section, li');
                             const items = [];
+                            // Mots-clés de rejet pour nettoyer le bruit
+                            const junk = ['folie', 'seite', 'kategorie', 'rolex uhren', 'preisübersicht'];
 
                             elements.forEach(el => {
                                 const text = el.innerText || "";
-                                // On cible les blocs qui ont l'air d'être des annonces (taille moyenne)
-                                if (text.includes('CHF') && text.length < 600 && text.length > 40) {
-                                    // Extraction du prix par Regex
-                                    const priceMatch = text.match(/(\d[\d\s',.]*)\s?CHF/i);
+                                const lowerText = text.toLowerCase();
+                                const firstLine = text.split('\\n')[0].trim().toLowerCase();
+
+                                // On ne prend que si "Submariner" est présent et que ce n'est pas du bruit (junk)
+                                const isSubmariner = lowerText.includes('submariner');
+                                const isJunk = junk.some(term => firstLine.includes(term));
+
+                                if (isSubmariner && !isJunk && text.includes('CHF') && text.length < 500 && text.length > 30) {
+                                    const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?CHF/i);
                                     if (priceMatch) {
                                         const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
-                                        if (cleanPrice > 500) {
+                                        // Seuil réaliste pour une Submariner (évite les accessoires)
+                                        if (cleanPrice > 4000) {
                                             items.push({
-                                                "title": text.split('\\n')[0].substring(0, 60),
+                                                "title": text.split('\\n')[0].substring(0, 60).trim(),
                                                 "price": cleanPrice,
                                                 "url": el.querySelector('a')?.href || window.location.href,
                                                 "brand": "Rolex",
@@ -71,7 +78,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                                     }
                                 }
                             });
-                            // Dédoublonnage rapide
+                            // Dédoublonnage
                             return items.filter((v,i,a)=>a.findIndex(t=>(t.price===v.price && t.title===v.title))===i);
                         });
 
@@ -119,7 +126,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 new_logs = full_log[last_log_offset:]
                 if new_logs.strip():
                     for line in new_logs.strip().split('\n'):
-                        if any(x in line.lower() for x in ["terminée", "extraction", "dataset", "montres", "sync"]):
+                        if any(x in line.lower() for x in ["terminée", "extraction", "dataset", "submariner", "sync"]):
                             log(f"[AGENT] {line.strip()}", "SUCCESS", shared_storage, mission_id)
                 last_log_offset = len(full_log)
 
