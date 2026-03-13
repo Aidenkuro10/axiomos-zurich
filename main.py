@@ -56,7 +56,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.2.0_NATIVE_UPLINK",
+        "version": "3.3.0_PROXY_FINAL",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -64,8 +64,8 @@ def read_root():
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    Proxy pour le flux visuel.
-    Redirige vers l'URL native d'Apify ou ImgBB selon la source détectée.
+    PROXY ACTIF: Télécharge l'image depuis Apify et la sert en direct.
+    Bypasse les sécurités CORS et Referrer-Policy du navigateur.
     """
     mission = load_mission(mission_id)
     if not mission:
@@ -73,11 +73,17 @@ async def proxy_live_image(mission_id: str):
     
     stream_url = mission.get("stream_url")
     
-    # CORRECTIF: Accepte maintenant les URLs Apify et ImgBB
-    if stream_url and ("apify.com" in stream_url or "ibb.co" in stream_url):
-        return RedirectResponse(url=stream_url)
+    if stream_url and "apify.com" in stream_url:
+        try:
+            # On récupère l'image côté serveur
+            resp = requests.get(stream_url, timeout=5)
+            if resp.status_code == 200:
+                # On renvoie le contenu binaire avec le bon type MIME
+                return Response(content=resp.content, media_type="image/jpeg")
+        except Exception as e:
+            print(f"DEBUG: Proxy Download Error: {str(e)}")
 
-    # Fallback image d'attente (LuxSoft Branding)
+    # Fallback vers image d'attente si l'uplink n'est pas prêt ou échoue
     idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
     return RedirectResponse(url=idle_url)
 
@@ -86,7 +92,6 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
     loop = asyncio.get_event_loop()
     
     initial_state = load_mission(mission_id)
-    # shared_ref servira de pont mémoire avec apify_client
     shared_ref = {mission_id: initial_state}
 
     try:
@@ -95,7 +100,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # --- SYNC POINT: Sauvegarde du stream_url (Native Apify) mis à jour dans shared_ref ---
+        # --- SYNC POINT: Sauvegarde du stream_url mis à jour dans shared_ref ---
         updated_in_ram = shared_ref.get(mission_id)
         if updated_in_ram and updated_in_ram.get("stream_url"):
             save_mission(mission_id, updated_in_ram)
