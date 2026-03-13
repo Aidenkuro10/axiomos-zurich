@@ -44,7 +44,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "4.2.0_TINY_HYBRID_STREAM",
+        "version": "4.2.5_STABLE_STREAM",
         "engine": "Axiomos Visual Pipeline"
     }
 
@@ -53,27 +53,38 @@ def read_root():
 async def stream_uplink(mission_id: str):
     """
     ROUTE CRITIQUE : Simule le mode SSE de TinyFix.
-    Garde la connexion ouverte pour envoyer l'URL de stream dès qu'elle est prête.
+    Maintient le tunnel ouvert entre Render et le Frontend.
     """
     async def event_generator():
         last_url = None
-        # On garde le flux ouvert pendant 2 minutes max
-        for _ in range(120):
+        # On garde le flux ouvert pendant 180 cycles (environ 6 minutes)
+        for _ in range(180):
             mission = active_missions.get(mission_id)
             if not mission:
-                break
+                # Si non en RAM, on tente de charger depuis SQLite
+                mission = load_mission(mission_id)
+                if not mission: break
             
             current_url = mission.get("stream_url")
-            # On n'envoie que si l'URL a changé (économie de bande passante Render)
+            
+            # 1. Envoi de l'URL si elle a changé
             if current_url and current_url != last_url:
                 last_url = current_url
-                yield f"data: {json.dumps({'type': 'STREAMING_URL', 'url': current_url})}\n\n"
+                payload = {"type": "STREAMING_URL", "url": current_url, "ts": time.time()}
+                yield f"data: {json.dumps(payload)}\n\n"
             
-            # Heartbeat pour éviter que Render ne coupe la connexion
+            # 2. Envoi des logs en temps réel
+            logs = mission.get("live_logs", [])
+            if logs:
+                yield f"data: {json.dumps({'type': 'LOGS', 'data': logs[-1]})}\n\n"
+            
+            # 3. Heartbeat pour Render (Crucial)
             yield "data: {\"type\": \"HEARTBEAT\"}\n\n"
             
+            # 4. Condition de sortie
             if mission.get("status") in ["completed", "failed", "error"]:
-                yield f"data: {json.dumps({'type': 'COMPLETE', 'status': mission.get('status')})}\n\n"
+                final_payload = {"type": "COMPLETE", "status": mission.get("status")}
+                yield f"data: {json.dumps(final_payload)}\n\n"
                 break
                 
             await asyncio.sleep(2)
@@ -82,13 +93,15 @@ async def stream_uplink(mission_id: str):
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
-    """Tunnel binaire pour bypasser les sécurités CORS."""
+    """Relais binaire pour bypasser les sécurités CORS et le cache navigateur."""
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission or not mission.get("stream_url"):
         return Response(status_code=404)
     
     try:
-        resp = requests.get(mission["stream_url"], timeout=5)
+        # On ajoute un paramètre de cache-busting interne pour Apify
+        apify_url = f"{mission['stream_url']}&nocache={time.time()}"
+        resp = requests.get(apify_url, timeout=5)
         if resp.status_code == 200:
             return Response(content=resp.content, media_type="image/jpeg")
     except Exception as e:
@@ -97,6 +110,7 @@ async def proxy_live_image(mission_id: str):
     return Response(status_code=404)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
+    """Orchestrateur asynchrone."""
     loop = asyncio.get_event_loop()
     try:
         # Phase 1: Navigation & Capture (Apify)
@@ -116,10 +130,12 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             )
             active_missions[mission_id].update({"report": report.dict(), "status": "completed"})
             save_mission(mission_id, active_missions[mission_id])
+            print(f"--- SUCCESS: Mission {mission_id} finalized ---")
     except Exception as e:
         print(f"Critical Failure {mission_id}: {str(e)}")
         if mission_id in active_missions:
             active_missions[mission_id]["status"] = "error"
+            save_mission(mission_id, active_missions[mission_id])
 
 @app.post("/run-mission")
 async def start_mission(
@@ -127,15 +143,19 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    if str(x_axiomos_auth).strip().replace('"', '').replace("'", "") != AXIOMOS_INTERNAL_AUTH:
-        raise HTTPException(status_code=401)
+    # Authentification stricte
+    received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
+    expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
+
+    if received != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     mission_id = str(uuid.uuid4())[:8]
     active_missions[mission_id] = {
         "status": "running",
         "run_id": None,
         "stream_url": None, 
-        "live_logs": [],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Mission Initiated. Opening Tunnel..."}],
         "report": None
     }
     
