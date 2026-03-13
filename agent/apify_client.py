@@ -1,13 +1,14 @@
 import time
 import os
+import requests
 from apify_client import ApifyClient
 from config.secrets import get_apify_token
 from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Version LUXSOFT - Direct Uplink Protocol.
-    Injecte le run_id en temps réel pour permettre au frontend de bypasser le proxy Render.
+    Version LUXSOFT - Verified Visual Uplink.
+    Ne synchronise le run_id que lorsqu'une image valide est confirmée.
     """
     token = get_apify_token()
     if not token:
@@ -19,7 +20,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Initiating VISUAL FOCUS UPLINK...", "INFO", shared_storage, mission_id)
         
-        # LANCEMENT DE L'AGENT
+        # 1. LANCEMENT DE L'AGENT
         data_run = client.actor("apify/rag-web-browser").start(
             run_input={
                 "startUrls": [{"url": str(url)}],
@@ -27,7 +28,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 "maxPagesPerCrawl": 1,
                 "proxyConfiguration": {"useApifyProxy": True},
                 "saveScreenshot": True,
-                "dynamicContentWaitSecs": 15, # On laisse du temps au rendu
+                "dynamicContentWaitSecs": 15,
                 "waitUntil": "networkidle",
                 "maxResults": 3
             },
@@ -35,22 +36,35 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         )
         d_run_id = data_run["id"]
 
-        # --- ÉTAPE CRUCIALE : On expose l'ID au reste du système immédiatement ---
-        if shared_storage is not None and mission_id in shared_storage:
-            shared_storage[mission_id]["run_id"] = d_run_id
-            log(f"Uplink established. Run ID synchronized: {d_run_id}", "INFO", shared_storage, mission_id)
-
-        # PAUSE INITIALE : Pour laisser le temps à la première image d'exister sur Apify
+        # PAUSE INITIALE : Laisser le moteur démarrer
         time.sleep(12)
 
         last_log_offset = 0
+        visual_ready = False
         
+        # 2. BOUCLE DE MONITORING AVEC VALIDATION D'IMAGE
         while True:
-            # Récupération de l'état du Run
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
             
-            # MISE À JOUR DU VISUEL (Pour compatibilité, même si le frontend va bypasser)
+            # --- VALIDATION BINAIRE DE L'IMAGE ---
+            if not visual_ready:
+                try:
+                    # On teste l'URL officielle (singulier: screenshot)
+                    check_url = f"https://api.apify.com/v2/runs/{d_run_id}/screenshot?token={token}"
+                    r = requests.get(check_url, timeout=5)
+                    
+                    # Si l'image fait plus de 1000 octets, elle est valide (pas un pixel vide)
+                    if r.status_code == 200 and len(r.content) > 1000:
+                        if shared_storage is not None and mission_id in shared_storage:
+                            # ON DÉBLOQUE LE FRONTEND ICI
+                            shared_storage[mission_id]["run_id"] = d_run_id 
+                            visual_ready = True
+                            log("Satellite Uplink: Image stream synchronized.", "SUCCESS", shared_storage, mission_id)
+                except Exception:
+                    pass
+
+            # MISE À JOUR DU STREAM URL (Backup)
             if shared_storage is not None and mission_id in shared_storage:
                 ts = int(time.time())
                 shared_storage[mission_id]["stream_url"] = f"https://api.apify.com/v2/runs/{d_run_id}/screenshot?token={token}&v={ts}"
@@ -69,9 +83,9 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
             
-            # On boucle toutes les 5 secondes pour la télémétrie
             time.sleep(5.0)
 
+        # 3. FINALISATION
         if d_status == "SUCCEEDED":
             dataset_id = d_details.get("defaultDatasetId")
             log(f"✅ Mission successful. Dataset {dataset_id} ready.", "SUCCESS", shared_storage, mission_id)
