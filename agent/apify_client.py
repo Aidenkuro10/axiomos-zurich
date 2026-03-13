@@ -7,7 +7,7 @@ from utils.logger import log
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Orchestrateur LuxSoft - Version DEMO STABLE.
-    Force l'utilisation de Playwright pour garantir la capture de screenshots.
+    Force l'utilisation de browser-playwright pour garantir la capture de screenshots.
     """
     token = get_apify_token()
     if not token:
@@ -19,25 +19,25 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Initiating NATIVE LIVE UPLINK...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DE L'AGENT AVEC CONFIGURATION VISUELLE FORCÉE
+        # 1. LANCEMENT DE L'AGENT AVEC CONFIGURATION VISUELLE RECTIFIÉE
         log("Deploying Autonomous Extraction Core...", "ACTION", shared_storage, mission_id)
         
-        # Configuration optimisée pour le visuel
+        # Configuration optimisée pour le visuel et validée par Apify
         run_input = {
             "startUrls": [{"url": str(url)}],
             "query": str(goal),
-            "maxPagesPerCrawl": 1,        # Limité à 1 pour stabiliser le live
+            "maxPagesPerCrawl": 1,        
             "maxResults": 3,
             "proxyConfiguration": {"useApifyProxy": True},
-            # --- PARAMÈTRES CRITIQUES POUR LE FLUX VIDÉO ---
-            "scrapingTool": "playwright", # Force l'ouverture d'un vrai Chrome
-            "dynamicContentWaitSecs": 10, # Force l'agent à rester 10s sur la page (pour le live)
+            # --- SYNTAXE EXACTE POUR CET ACTOR ---
+            "scrapingTool": "browser-playwright", 
+            "dynamicContentWaitSecs": 10, 
             "removeCookieWarnings": True
         }
 
         data_run = client.actor("apify/rag-web-browser").start(
             run_input=run_input,
-            memory_mbytes=1024 # Augmenté pour supporter Playwright/Chrome
+            memory_mbytes=1024 
         )
         d_run_id = data_run["id"]
 
@@ -47,8 +47,8 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             shared_storage[mission_id]["stream_url"] = native_live_url
             log(f"🚀 NATIVE UPLINK SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # Petit délai de sécurité pour laisser le navigateur ouvrir la page
-        time.sleep(3)
+        # Délai pour laisser Playwright charger le moteur Chrome
+        time.sleep(4)
 
         last_log_offset = 0
         
@@ -65,7 +65,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     for line in new_logs.strip().split('\n'):
                         line_content = line.strip()
                         if line_content:
-                            # Filtrage pour le dashboard LuxSoft
                             if any(x in line_content.lower() for x in ["navigating", "extracting", "found", "clicking", "browser", "page", "waiting"]):
                                 log(f"[AGENT] {line_content}", "INFO", shared_storage, mission_id)
                 last_log_offset = len(full_log)
