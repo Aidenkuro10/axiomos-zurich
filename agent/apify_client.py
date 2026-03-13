@@ -53,7 +53,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             # MISE À JOUR DU VISUEL (Pour compatibilité, même si le frontend va bypasser)
             if shared_storage is not None and mission_id in shared_storage:
                 ts = int(time.time())
-                shared_storage[mission_id]["stream_url"] = f"https://api.apify.com/v2/runs/{d_run_id}/screenshots/last?token={token}&v={ts}"
+                shared_storage[mission_id]["stream_url"] = f"https://api.apify.com/v2/runs/{d_run_id}/screenshot?token={token}&v={ts}"
 
             # MISE À JOUR DES LOGS
             full_log = client.log(d_run_id).get()
