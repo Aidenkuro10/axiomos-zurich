@@ -23,6 +23,10 @@ init_db()
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 executor = ThreadPoolExecutor(max_workers=10)
 
+# --- CACHE MÉMOIRE GLOBAL POUR LE TEMPS RÉEL ---
+# Indispensable pour que le polling voit les changements instantanément
+active_missions: Dict[str, Any] = {}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -56,7 +60,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.3.0_PROXY_FINAL",
+        "version": "3.5.0_REALTIME_SYNC",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -65,9 +69,10 @@ def read_root():
 async def proxy_live_image(mission_id: str):
     """
     PROXY ACTIF: Télécharge l'image depuis Apify et la sert en direct.
-    Bypasse les sécurités CORS et Referrer-Policy du navigateur.
+    Priorité à la RAM pour éviter le délai de la base de données.
     """
-    mission = load_mission(mission_id)
+    # On regarde d'abord dans la mémoire vive
+    mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         return Response(status_code=404)
     
@@ -75,70 +80,58 @@ async def proxy_live_image(mission_id: str):
     
     if stream_url and "apify.com" in stream_url:
         try:
-            # On récupère l'image côté serveur
             resp = requests.get(stream_url, timeout=5)
             if resp.status_code == 200:
-                # On renvoie le contenu binaire avec le bon type MIME
                 return Response(content=resp.content, media_type="image/jpeg")
         except Exception as e:
             print(f"DEBUG: Proxy Download Error: {str(e)}")
 
-    # Fallback vers image d'attente si l'uplink n'est pas prêt ou échoue
+    # Fallback vers image d'attente
     idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
     return RedirectResponse(url=idle_url)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration avec synchronisation RAM -> DB."""
+    """Pipeline d'orchestration avec synchronisation RAM immédiate."""
     loop = asyncio.get_event_loop()
     
-    initial_state = load_mission(mission_id)
-    shared_ref = {mission_id: initial_state}
-
     try:
-        # Phase 1: Capture Visuelle & Extraction Data
+        # Phase 1: Capture & Extraction
+        # L'agent écrit DIRECTEMENT dans active_missions[mission_id] via la référence
         dataset_id = await loop.run_in_executor(
-            executor, launch_apify_automation, url, goal, shared_ref, mission_id
+            executor, launch_apify_automation, url, goal, active_missions, mission_id
         )
         
-        # --- SYNC POINT: Sauvegarde du stream_url mis à jour dans shared_ref ---
-        updated_in_ram = shared_ref.get(mission_id)
-        if updated_in_ram and updated_in_ram.get("stream_url"):
-            save_mission(mission_id, updated_in_ram)
-            print(f"DEBUG: stream_url synchronisé vers DB: {updated_in_ram.get('stream_url')}")
-
-        current_state = load_mission(mission_id)
+        # On persiste l'état actuel (incluant le stream_url) dès la fin de phase 1
+        save_mission(mission_id, active_missions[mission_id])
 
         if dataset_id:
-            current_state["status"] = "analyzing"
-            save_mission(mission_id, current_state)
-
+            active_missions[mission_id]["status"] = "analyzing"
+            
             # Phase 2: Analyse du Dataset
             deals = await loop.run_in_executor(
-                executor, analyze_market_deals, dataset_id, 0.10, shared_ref, mission_id
+                executor, analyze_market_deals, dataset_id, 0.10, active_missions, mission_id
             )
             
             # Phase 3: Génération du Rapport
             report = await loop.run_in_executor(
-                executor, generate_final_report, mission_id, deals, shared_ref
+                executor, generate_final_report, mission_id, deals, active_missions
             )
             
-            final_state = load_mission(mission_id)
-            final_state["report"] = report.dict()
-            final_state["status"] = "completed"
-            save_mission(mission_id, final_state)
+            active_missions[mission_id]["report"] = report.dict()
+            active_missions[mission_id]["status"] = "completed"
             
+            # Sauvegarde finale en base de données
+            save_mission(mission_id, active_missions[mission_id])
             print(f"--- SUCCESS: Mission {mission_id} completed ---")
         else:
-            final_state = load_mission(mission_id)
-            final_state["status"] = "failed"
-            save_mission(mission_id, final_state)
+            active_missions[mission_id]["status"] = "failed"
+            save_mission(mission_id, active_missions[mission_id])
             
     except Exception as e:
         print(f"💥 Runner Critical Failure {mission_id}: {str(e)}")
-        current = load_mission(mission_id)
-        if current:
-            current["status"] = "error"
-            save_mission(mission_id, current)
+        if mission_id in active_missions:
+            active_missions[mission_id]["status"] = "error"
+            save_mission(mission_id, active_missions[mission_id])
 
 @app.post("/run-mission")
 async def start_mission(
@@ -160,6 +153,9 @@ async def start_mission(
         "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Launching Autonomous Agent."}],
         "report": None
     }
+    
+    # On initialise en RAM et en DB simultanément
+    active_missions[mission_id] = initial_data
     save_mission(mission_id, initial_data)
     
     background_tasks.add_task(execute_mission_task, mission_id, request.url, request.goal)
@@ -176,7 +172,8 @@ async def get_mission_status(
     if received != expected:
          raise HTTPException(status_code=401, detail="Unauthorized")
 
-    mission = load_mission(mission_id)
+    # PRIORITÉ À LA RAM pour le polling en temps réel
+    mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
         
