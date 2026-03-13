@@ -56,7 +56,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.1.0_STABLE_UPLINK",
+        "version": "3.2.0_NATIVE_UPLINK",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -64,8 +64,8 @@ def read_root():
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    Proxy simplifié pour ImgBB.
-    Redirige directement vers l'URL publique fournie par l'agent.
+    Proxy pour le flux visuel.
+    Redirige vers l'URL native d'Apify ou ImgBB selon la source détectée.
     """
     mission = load_mission(mission_id)
     if not mission:
@@ -73,8 +73,8 @@ async def proxy_live_image(mission_id: str):
     
     stream_url = mission.get("stream_url")
     
-    # Si l'image ImgBB est prête, on redirige le navigateur dessus
-    if stream_url and "ibb.co" in stream_url:
+    # CORRECTIF: Accepte maintenant les URLs Apify et ImgBB
+    if stream_url and ("apify.com" in stream_url or "ibb.co" in stream_url):
         return RedirectResponse(url=stream_url)
 
     # Fallback image d'attente (LuxSoft Branding)
@@ -90,12 +90,12 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
     shared_ref = {mission_id: initial_state}
 
     try:
-        # Phase 1: Capture Visuelle (ImgBB) & Extraction Data
+        # Phase 1: Capture Visuelle & Extraction Data
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # --- SYNC POINT: Sauvegarde du stream_url mis à jour dans shared_ref ---
+        # --- SYNC POINT: Sauvegarde du stream_url (Native Apify) mis à jour dans shared_ref ---
         updated_in_ram = shared_ref.get(mission_id)
         if updated_in_ram and updated_in_ram.get("stream_url"):
             save_mission(mission_id, updated_in_ram)
@@ -152,7 +152,7 @@ async def start_mission(
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Launching Dual-Core Agents."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Launching Autonomous Agent."}],
         "report": None
     }
     save_mission(mission_id, initial_data)
