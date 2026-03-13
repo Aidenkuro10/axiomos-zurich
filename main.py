@@ -12,8 +12,7 @@ from pydantic import BaseModel
 
 # Internal LuxSoft service imports
 from agent.apify_client import launch_apify_automation
-from services.data_analyzer import analyze_market_deals
-from services.report_builder import generate_final_report
+from services.smart_analyzer import generate_arbitrage_report # Nouveau service "Cerveau"
 from config.secrets import AXIOMOS_INTERNAL_AUTH, get_apify_token
 from utils.database import init_db, save_mission, load_mission
 from utils.logger import log
@@ -54,7 +53,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.6.0_STABLE_UPLINK",
+        "version": "4.0.0_HYBRID_CORE",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -62,8 +61,7 @@ def read_root():
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    PROXY SYNCHRONE (STABLE): Utilise requests pour garantir l'affichage 
-    du flux Puppeteer sans les erreurs de timeout de httpx.
+    PROXY SYNCHRONE : Affiche le flux Puppeteer en direct.
     """
     mission = load_mission(mission_id)
     if not mission:
@@ -73,7 +71,6 @@ async def proxy_live_image(mission_id: str):
     
     if stream_url and "apify.com" in stream_url:
         try:
-            # On garde requests ici car c'est ce qui marchait pour tes images
             resp = requests.get(stream_url, timeout=10)
             if resp.status_code == 200:
                 return Response(content=resp.content, media_type="image/png")
@@ -84,49 +81,49 @@ async def proxy_live_image(mission_id: str):
     return RedirectResponse(url=idle_url)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration avec pause de synchronisation forcée."""
+    """
+    Pipeline d'orchestration Hybride :
+    1. L'ŒIL (Puppeteer) : Défilement visuel et capture de texte.
+    2. LE CERVEAU (IA) : Analyse sémantique et rapport d'arbitrage.
+    """
     loop = asyncio.get_event_loop()
     initial_state = load_mission(mission_id)
     shared_ref = {mission_id: initial_state}
 
     try:
-        # Phase 1: Automation (L'agent travaille)
-        dataset_id = await loop.run_in_executor(
+        # Phase 1: L'ŒIL (Automation & Acquisition)
+        # On récupère le raw_text directement en retour de l'automation
+        raw_text = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # --- POINT CRITIQUE : PAUSE DE SYNCHRONISATION ---
-        # On attend 12 secondes pour que les serveurs Apify finissent d'écrire le Dataset.
-        # C'est ce qui évite d'avoir un rapport "0 items".
-        log(f"Mission {mission_id}: Syncing cloud data... (12s)", "INFO", shared_ref, mission_id)
-        await asyncio.sleep(12)
-        
-        # Sauvegarde du stream_url final
+        # Mise à jour immédiate du stream_url pour le dashboard pendant l'analyse
         updated_in_ram = shared_ref.get(mission_id)
         if updated_in_ram:
             save_mission(mission_id, updated_in_ram)
 
-        if dataset_id:
+        if raw_text:
             current_state = load_mission(mission_id)
             current_state["status"] = "analyzing"
             save_mission(mission_id, current_state)
 
-            # Phase 2: Analyse
-            deals = await loop.run_in_executor(
-                executor, analyze_market_deals, dataset_id, 0.10, shared_ref, mission_id
+            # Phase 2: LE CERVEAU (Intelligence Artificielle)
+            # Utilise le texte capturé pour générer un rapport précis
+            report_content = await loop.run_in_executor(
+                executor, generate_arbitrage_report, raw_text, goal, mission_id, shared_ref
             )
             
-            # Phase 3: Rapport
-            report = await loop.run_in_executor(
-                executor, generate_final_report, mission_id, deals, shared_ref
-            )
-            
+            # Phase 3: Construction du rapport final
             final_state = load_mission(mission_id)
-            final_state["report"] = report.dict()
+            final_state["report"] = {
+                "title": f"Axiomos Intelligence Report - {mission_id}",
+                "content": report_content,
+                "timestamp": time.strftime("%H:%M:%S")
+            }
             final_state["status"] = "completed"
             save_mission(mission_id, final_state)
             
-            print(f"--- SUCCESS: Mission {mission_id} completed ---")
+            print(f"--- SUCCESS: Mission {mission_id} completed via Hybrid Engine ---")
         else:
             final_state = load_mission(mission_id)
             final_state["status"] = "failed"
@@ -155,7 +152,7 @@ async def start_mission(
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Launching Autonomous Agent."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Hybrid Uplink secured. Deploying Eye & Brain units."}],
         "report": None
     }
     save_mission(mission_id, initial_data)
