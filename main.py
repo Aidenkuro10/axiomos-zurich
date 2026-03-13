@@ -23,8 +23,8 @@ init_db()
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 executor = ThreadPoolExecutor(max_workers=10)
 
-# --- CACHE MÉMOIRE GLOBAL POUR LE TEMPS RÉEL ---
-# Indispensable pour que le polling voit les changements instantanément
+# --- CACHE MÉMOIRE GLOBAL ---
+# Indispensable pour la synchronisation immédiate avec l'agent
 active_missions: Dict[str, Any] = {}
 
 app.add_middleware(
@@ -42,7 +42,7 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    """Diagnostic de survie pour vérifier la persistance SQLite."""
+    """Diagnostic de survie."""
     import sqlite3
     mission_count = 0
     db_status = "NOT_FOUND"
@@ -60,7 +60,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.5.0_REALTIME_SYNC",
+        "version": "3.6.0_STABLE_PROXY",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -69,9 +69,9 @@ def read_root():
 async def proxy_live_image(mission_id: str):
     """
     PROXY ACTIF: Télécharge l'image depuis Apify et la sert en direct.
-    Priorité à la RAM pour éviter le délai de la base de données.
+    Bypasse les sécurités CORS en renvoyant toujours un code 200.
     """
-    # On regarde d'abord dans la mémoire vive
+    # Priorité absolue à la RAM pour le live
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         return Response(status_code=404)
@@ -80,55 +80,58 @@ async def proxy_live_image(mission_id: str):
     
     if stream_url and "apify.com" in stream_url:
         try:
+            # On aspire l'image côté serveur
             resp = requests.get(stream_url, timeout=5)
             if resp.status_code == 200:
+                # On renvoie les octets binaires (Code 200)
                 return Response(content=resp.content, media_type="image/jpeg")
         except Exception as e:
-            print(f"DEBUG: Proxy Download Error: {str(e)}")
+            print(f"DEBUG PROXY ERROR: {str(e)}")
 
-    # Fallback vers image d'attente
-    idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
-    return RedirectResponse(url=idle_url)
+    # ANTI-307: Au lieu de RedirectResponse, on renvoie un pixel transparent (Code 200)
+    # Cela évite que le navigateur ne bloque la requête.
+    transparent_pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\x2d\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+    return Response(content=transparent_pixel, media_type="image/png")
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration avec synchronisation RAM immédiate."""
+    """Pipeline d'orchestration LuxSoft."""
     loop = asyncio.get_event_loop()
     
     try:
         # Phase 1: Capture & Extraction
-        # L'agent écrit DIRECTEMENT dans active_missions[mission_id] via la référence
+        # L'agent écrit directement dans active_missions[mission_id]
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, active_missions, mission_id
         )
         
-        # On persiste l'état actuel (incluant le stream_url) dès la fin de phase 1
+        # Persistance immédiate après Phase 1
         save_mission(mission_id, active_missions[mission_id])
 
         if dataset_id:
             active_missions[mission_id]["status"] = "analyzing"
-            
-            # Phase 2: Analyse du Dataset
+            save_mission(mission_id, active_missions[mission_id])
+
+            # Phase 2: Analyse
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, active_missions, mission_id
             )
             
-            # Phase 3: Génération du Rapport
+            # Phase 3: Rapport
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, active_missions
             )
             
             active_missions[mission_id]["report"] = report.dict()
             active_missions[mission_id]["status"] = "completed"
-            
-            # Sauvegarde finale en base de données
             save_mission(mission_id, active_missions[mission_id])
+            
             print(f"--- SUCCESS: Mission {mission_id} completed ---")
         else:
             active_missions[mission_id]["status"] = "failed"
             save_mission(mission_id, active_missions[mission_id])
             
     except Exception as e:
-        print(f"💥 Runner Critical Failure {mission_id}: {str(e)}")
+        print(f"💥 Runner Failure {mission_id}: {str(e)}")
         if mission_id in active_missions:
             active_missions[mission_id]["status"] = "error"
             save_mission(mission_id, active_missions[mission_id])
@@ -150,11 +153,10 @@ async def start_mission(
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Launching Autonomous Agent."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Launching Autonomous Agent..."}],
         "report": None
     }
     
-    # On initialise en RAM et en DB simultanément
     active_missions[mission_id] = initial_data
     save_mission(mission_id, initial_data)
     
@@ -172,7 +174,6 @@ async def get_mission_status(
     if received != expected:
          raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # PRIORITÉ À LA RAM pour le polling en temps réel
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
@@ -181,5 +182,4 @@ async def get_mission_status(
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
