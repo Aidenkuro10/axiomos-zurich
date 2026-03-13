@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version STRATÉGIQUE (ANTI-DOUBLONS).
-    Filtre les Submariner uniques et maintient le flux d'images live.
+    Orchestrateur LuxSoft - Version SNIPER STRATÉGIQUE.
+    Cible uniquement les containers d'annonces réels pour éviter le bruit marketing.
     """
     token = get_apify_token()
     if not token:
@@ -30,7 +30,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     const { page, log } = context;
                     await page.setViewport({ width: 1280, height: 800 });
                     
-                    // --- VERROU DE MÉMOIRE POUR ÉVITER LES DOUBLONS ---
                     const sentItems = new Set();
 
                     try {
@@ -42,54 +41,54 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     } catch (e) { log.info('Cookies handled.'); }
 
                     for (let i = 0; i < 12; i++) {
-                        // A. Capture visuelle (IMAGE INTACTE)
+                        // A. Capture visuelle pour le Dashboard (VUE_DIRECTE)
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        // B. EXTRACTION CIBLÉE (FILTRE UNIQUE SUBMARINER)
+                        // B. EXTRACTION CIBLÉE (MODE SNIPER)
                         const visibleItems = await page.evaluate((alreadySent) => {
-                            const elements = document.querySelectorAll('div, article, section, li');
+                            // On cible UNIQUEMENT les vraies cartes de produits Chrono24
+                            const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card');
                             const foundNow = [];
-                            const junk = ['folie', 'seite', 'kategorie', 'rolex uhren', 'preisübersicht'];
 
-                            elements.forEach(el => {
-                                const text = el.innerText || "";
-                                const lowerText = text.toLowerCase();
-                                const firstLine = text.split('\\n')[0].trim();
+                            cards.forEach(card => {
+                                const text = card.innerText || "";
+                                const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
+                                
+                                // On cherche un prix uniquement à l'intérieur de la carte
+                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?CHF/i);
 
-                                // Stratégie : Submariner uniquement + prix CHF
-                                if (lowerText.includes('submariner') && text.includes('CHF')) {
-                                    const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?CHF/i);
-                                    if (priceMatch) {
-                                        const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
-                                        const itemID = `${firstLine.substring(0,30)}-${cleanPrice}`;
+                                if (titleEl && priceMatch) {
+                                    const title = titleEl.innerText.trim();
+                                    const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
+                                    const itemID = `${title.substring(0,20)}-${cleanPrice}`;
 
-                                        const isJunk = junk.some(term => firstLine.toLowerCase().includes(term));
+                                    // FILTRE DE PRÉCISION : Submariner + Prix Réaliste (entre 5k et 50k)
+                                    // Cela évite de choper les articles de blog à 91k CHF.
+                                    const isSub = title.toLowerCase().includes('submariner');
+                                    const isDuplicate = alreadySent.includes(itemID);
 
-                                        // On ne prend que si c'est une vraie montre (>4000) et JAMAIS envoyé
-                                        if (cleanPrice > 4000 && !isJunk && !alreadySent.includes(itemID)) {
-                                            foundNow.push({
-                                                "id": itemID,
-                                                "title": firstLine.substring(0, 60),
-                                                "price": cleanPrice,
-                                                "url": el.querySelector('a')?.href || window.location.href,
-                                                "brand": "Rolex",
-                                                "condition": "Pre-owned"
-                                            });
-                                        }
+                                    if (isSub && !isDuplicate && cleanPrice > 5000 && cleanPrice < 50000) {
+                                        foundNow.push({
+                                            "id": itemID,
+                                            "title": title,
+                                            "price": cleanPrice,
+                                            "url": card.querySelector('a')?.href || window.location.href,
+                                            "brand": "Rolex",
+                                            "condition": "Pre-owned"
+                                        });
                                     }
                                 }
                             });
                             return foundNow;
                         }, Array.from(sentItems));
 
-                        // C. Synchronisation et envoi
                         if (visibleItems.length > 0) {
                             visibleItems.forEach(item => sentItems.add(item.id));
                             await context.pushData(visibleItems);
                         }
 
-                        // D. Scroll augmenté pour changer de vue
+                        // C. Scroll et pause pour le chargement
                         await page.evaluate(() => window.scrollBy(0, 800));
                         await new Promise(r => setTimeout(r, 2000));
                     }
