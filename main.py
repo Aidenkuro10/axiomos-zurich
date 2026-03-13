@@ -2,7 +2,7 @@ import uuid
 import time
 import asyncio
 import os
-import httpx  # Plus performant que requests pour FastAPI
+import requests
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
@@ -14,10 +14,10 @@ from pydantic import BaseModel
 from agent.apify_client import launch_apify_automation
 from services.data_analyzer import analyze_market_deals
 from services.report_builder import generate_final_report
-from config.secrets import AXIOMOS_INTERNAL_AUTH
+from config.secrets import AXIOMOS_INTERNAL_AUTH, get_apify_token
 from utils.database import init_db, save_mission, load_mission
-from utils.logger import log # Utilisation du vrai logger
 
+# Initialisation de la base de données au démarrage
 init_db()
 
 app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
@@ -25,7 +25,7 @@ executor = ThreadPoolExecutor(max_workers=10)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # À restreindre si possible à ton domaine .pages.dev
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,73 +35,112 @@ class MissionRequest(BaseModel):
     url: str
     goal: str
 
+@app.head("/")
 @app.get("/")
 def read_root():
-    return {"status": "online", "service": "LuxSoft Engine", "version": "3.5.0_ASYNC"}
+    """Diagnostic de survie pour vérifier la persistance SQLite."""
+    import sqlite3
+    mission_count = 0
+    db_status = "NOT_FOUND"
+    
+    if os.path.exists("luxsoft_persistence.db"):
+        db_status = "ACTIVE"
+        try:
+            conn = sqlite3.connect("luxsoft_persistence.db")
+            cursor = conn.execute("SELECT COUNT(*) FROM missions")
+            mission_count = cursor.fetchone()[0]
+            conn.close()
+        except:
+            db_status = "CORRUPTED"
+
+    return {
+        "status": "online", 
+        "service": "LuxSoft Engine", 
+        "version": "3.4.0_PUPPETEER_HD",
+        "database": db_status,
+        "persisted_missions": mission_count
+    }
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    PROXY ASYNC: Télécharge l'image sans bloquer le serveur.
+    PROXY ACTIF: Télécharge l'image VUE_DIRECTE depuis Apify.
+    Bypasse les sécurités CORS et rafraîchit le flux visuel.
     """
     mission = load_mission(mission_id)
-    if not mission or not mission.get("stream_url"):
+    if not mission:
         return Response(status_code=404)
     
     stream_url = mission.get("stream_url")
     
-    async with httpx.AsyncClient() as client:
+    if stream_url and "apify.com" in stream_url:
         try:
-            resp = await client.get(stream_url, timeout=15.0)
+            # Timeout augmenté à 15s pour les captures Puppeteer plus lourdes
+            resp = requests.get(stream_url, timeout=15)
             if resp.status_code == 200:
+                # Utilisation de image/png pour une netteté maximale des textes
                 return Response(content=resp.content, media_type="image/png")
-        except Exception:
-            pass
+            else:
+                print(f"DEBUG: Apify Uplink Status {resp.status_code}")
+        except Exception as e:
+            print(f"DEBUG: Proxy Download Error: {str(e)}")
 
-    # Fallback Branding
-    return RedirectResponse(url="https://images.unsplash.com/photo-1547996160-81dfa63595dd?q=80&w=1280")
+    # Fallback vers image d'attente (LuxSoft Branding)
+    idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
+    return RedirectResponse(url=idle_url)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration optimisé."""
+    """Pipeline d'orchestration avec synchronisation RAM -> DB."""
     loop = asyncio.get_event_loop()
     
-    # On initialise en RAM pour éviter les lectures disques constantes
-    shared_ref = {mission_id: load_mission(mission_id)}
+    initial_state = load_mission(mission_id)
+    shared_ref = {mission_id: initial_state}
 
     try:
-        # Phase 1: Automation
+        # Phase 1: Capture Visuelle & Extraction Data (Puppeteer Engine)
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # Buffer de persistence
-        await asyncio.sleep(5)
+        # --- SYNC POINT: Sauvegarde du stream_url mis à jour ---
+        updated_in_ram = shared_ref.get(mission_id)
+        if updated_in_ram and updated_in_ram.get("stream_url"):
+            save_mission(mission_id, updated_in_ram)
+            print(f"DEBUG: Uplink VUE_DIRECTE synchronisé: {mission_id}")
+
+        current_state = load_mission(mission_id)
 
         if dataset_id:
-            shared_ref[mission_id]["status"] = "analyzing"
-            save_mission(mission_id, shared_ref[mission_id])
+            current_state["status"] = "analyzing"
+            save_mission(mission_id, current_state)
 
-            # Phase 2: Analyse
+            # Phase 2: Analyse du Dataset
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, shared_ref, mission_id
             )
             
-            # Phase 3: Rapport
+            # Phase 3: Génération du Rapport
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, shared_ref
             )
             
-            shared_ref[mission_id]["report"] = report.dict()
-            shared_ref[mission_id]["status"] = "completed"
-            save_mission(mission_id, shared_ref[mission_id])
+            final_state = load_mission(mission_id)
+            final_state["report"] = report.dict()
+            final_state["status"] = "completed"
+            save_mission(mission_id, final_state)
             
-            log(f"Mission {mission_id} completed successfully.", "SUCCESS", shared_ref, mission_id)
+            print(f"--- SUCCESS: Mission {mission_id} completed ---")
         else:
-            shared_ref[mission_id]["status"] = "failed"
-            save_mission(mission_id, shared_ref[mission_id])
+            final_state = load_mission(mission_id)
+            final_state["status"] = "failed"
+            save_mission(mission_id, final_state)
             
     except Exception as e:
-        log(f"Critical Runner Error: {str(e)}", "ERROR", shared_ref, mission_id)
+        print(f"💥 Runner Critical Failure {mission_id}: {str(e)}")
+        current = load_mission(mission_id)
+        if current:
+            current["status"] = "error"
+            save_mission(mission_id, current)
 
 @app.post("/run-mission")
 async def start_mission(
@@ -109,7 +148,6 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Nettoyage de la clé d'auth
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -119,24 +157,31 @@ async def start_mission(
     mission_id = str(uuid.uuid4())[:8]
     
     initial_data = {
-        "status": "initializing",
+        "status": "running",
         "stream_url": None, 
-        "live_logs": [],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Uplink synchronization... Launching Autonomous Agent."}],
         "report": None
     }
     save_mission(mission_id, initial_data)
-    
-    log(f"Handshake successful. Mission ID: {mission_id}", "INFO", {mission_id: initial_data}, mission_id)
     
     background_tasks.add_task(execute_mission_task, mission_id, request.url, request.goal)
     return {"mission_id": mission_id, "status": "initiated"}
 
 @app.get("/mission-status/{mission_id}")
-async def get_mission_status(mission_id: str):
-    # On retire l'auth sur le status pour simplifier le polling frontend (optionnel)
+async def get_mission_status(
+    mission_id: str, 
+    x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
+):
+    received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
+    expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
+
+    if received != expected:
+         raise HTTPException(status_code=401, detail="Unauthorized")
+
     mission = load_mission(mission_id)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
+        
     return mission
 
 if __name__ == "__main__":
