@@ -6,8 +6,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version DEMO STABLE.
-    Force l'utilisation de browser-playwright pour garantir la capture de screenshots.
+    Orchestrateur LuxSoft - Version LIVE VIDEO.
+    Bypasse le cache des screenshots pour un flux visuel dynamique.
     """
     token = get_apify_token()
     if not token:
@@ -19,20 +19,20 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Initiating NATIVE LIVE UPLINK...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DE L'AGENT AVEC CONFIGURATION VISUELLE RECTIFIÉE
+        # 1. LANCEMENT DE L'AGENT
         log("Deploying Autonomous Extraction Core...", "ACTION", shared_storage, mission_id)
         
-        # Configuration optimisée pour le visuel et validée par Apify
         run_input = {
             "startUrls": [{"url": str(url)}],
             "query": str(goal),
             "maxPagesPerCrawl": 1,        
             "maxResults": 3,
             "proxyConfiguration": {"useApifyProxy": True},
-            # --- SYNTAXE EXACTE POUR CET ACTOR ---
             "scrapingTool": "browser-playwright", 
             "dynamicContentWaitSecs": 10, 
-            "removeCookieWarnings": True
+            "removeCookieWarnings": True,
+            # Force la capture d'écran pour chaque page visitée
+            "saveScreenshot": True 
         }
 
         data_run = client.actor("apify/rag-web-browser").start(
@@ -40,15 +40,18 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             memory_mbytes=1024 
         )
         d_run_id = data_run["id"]
+        default_kv_store = data_run["defaultKeyValueStoreId"]
 
-        # 2. INJECTION IMMÉDIATE DE L'URL DANS LA RAM
+        # 2. CONFIGURATION DE L'URL LIVE (KV STORE BYPASS)
+        # On pointe directement vers le KV Store qui est mis à jour plus souvent que l'API de screenshots
         if shared_storage is not None and mission_id in shared_storage:
-            native_live_url = f"https://api.apify.com/v2/runs/{d_run_id}/screenshots/last?token={token}"
+            # On utilise le store ID spécifique de ce run pour éviter tout conflit
+            native_live_url = f"https://api.apify.com/v2/key-value-stores/{default_kv_store}/records/last-screenshot.jpg?token={token}"
             shared_storage[mission_id]["stream_url"] = native_live_url
             log(f"🚀 NATIVE UPLINK SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # Délai pour laisser Playwright charger le moteur Chrome
-        time.sleep(4)
+        # Laisser le temps à Playwright de boot
+        time.sleep(5)
 
         last_log_offset = 0
         
@@ -65,14 +68,16 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     for line in new_logs.strip().split('\n'):
                         line_content = line.strip()
                         if line_content:
-                            if any(x in line_content.lower() for x in ["navigating", "extracting", "found", "clicking", "browser", "page", "waiting"]):
+                            # Filtrage intelligent pour ne garder que les actions "visuelles"
+                            if any(x in line_content.lower() for x in ["navigating", "extracting", "found", "clicking", "browser", "page", "waiting", "screenshot"]):
                                 log(f"[AGENT] {line_content}", "INFO", shared_storage, mission_id)
                 last_log_offset = len(full_log)
 
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
             
-            time.sleep(1.5)
+            # On réduit un peu la fréquence de polling pour éviter que Render ne freeze le CPU
+            time.sleep(2.5)
 
         # 4. FINALISATION
         if d_status == "SUCCEEDED":

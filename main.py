@@ -41,13 +41,13 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    return {"status": "online", "version": "4.0.0_DIRECT_UPLINK"}
+    return {"status": "online", "version": "4.1.0_LIVE_STORE_UPLINK"}
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    DIRECT REDIRECT: Élimine le goulot d'étranglement du serveur.
-    Le navigateur client télécharge l'image directement depuis Apify.
+    DIRECT REDIRECT: Bypass total du goulot d'étranglement Render.
+    Le navigateur client va chercher l'image directement sur le KV Store d'Apify.
     """
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
@@ -56,23 +56,22 @@ async def proxy_live_image(mission_id: str):
     stream_url = mission.get("stream_url")
     
     if stream_url:
-        # On redirige vers l'URL d'Apify. Le navigateur client fera le travail.
+        # Redirection vers le KV Store d'Apify (plus rapide que screenshots/last)
         return RedirectResponse(url=stream_url)
 
-    # Image de secours (placeholder luxe) si l'URL n'est pas encore prête
-    idle_url = "https://images.unsplash.com/photo-1523170335258-f5ed11844a49?auto=format&fit=crop&q=80&w=1280"
-    return RedirectResponse(url=idle_url)
+    # Si pas d'URL, on renvoie un pixel vide pour ne pas casser le CSS du frontend
+    transparent_pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\x2d\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+    return Response(content=transparent_pixel, media_type="image/png")
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
     """Pipeline d'orchestration LuxSoft."""
     loop = asyncio.get_event_loop()
     try:
-        # Phase 1: Capture
+        # Phase 1: Capture (L'URL KV Store est injectée dès le début dans launch_apify_automation)
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, active_missions, mission_id
         )
         
-        # Sauvegarde RAM -> DB
         save_mission(mission_id, active_missions[mission_id])
 
         if dataset_id:
