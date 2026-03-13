@@ -24,7 +24,6 @@ app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 executor = ThreadPoolExecutor(max_workers=10)
 
 # --- CACHE MÉMOIRE GLOBAL ---
-# Indispensable pour la synchronisation immédiate avec l'agent
 active_missions: Dict[str, Any] = {}
 
 app.add_middleware(
@@ -42,83 +41,50 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    """Diagnostic de survie."""
-    import sqlite3
-    mission_count = 0
-    db_status = "NOT_FOUND"
-    
-    if os.path.exists("luxsoft_persistence.db"):
-        db_status = "ACTIVE"
-        try:
-            conn = sqlite3.connect("luxsoft_persistence.db")
-            cursor = conn.execute("SELECT COUNT(*) FROM missions")
-            mission_count = cursor.fetchone()[0]
-            conn.close()
-        except:
-            db_status = "CORRUPTED"
-
-    return {
-        "status": "online", 
-        "service": "LuxSoft Engine", 
-        "version": "3.7.0_FINAL_DEMO_SYNC",
-        "database": db_status,
-        "persisted_missions": mission_count
-    }
+    return {"status": "online", "version": "4.0.0_DIRECT_UPLINK"}
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    PROXY ACTIF: Télécharge l'image depuis Apify et la sert en direct au frontend.
-    Bypasse les sécurités CORS en renvoyant toujours un code 200.
+    DIRECT REDIRECT: Élimine le goulot d'étranglement du serveur.
+    Le navigateur client télécharge l'image directement depuis Apify.
     """
-    # Priorité absolue à la RAM pour la réactivité du live
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         return Response(status_code=404)
     
     stream_url = mission.get("stream_url")
     
-    if stream_url and "apify.com" in stream_url:
-        try:
-            # On laisse plus de temps à Apify pour répondre (10s)
-            resp = requests.get(stream_url, timeout=10)
-            if resp.status_code == 200 and len(resp.content) > 500:
-                # On renvoie les octets binaires (Code 200 OK)
-                return Response(content=resp.content, media_type="image/jpeg")
-            else:
-                print(f"DEBUG PROXY: Apify not ready yet (Code {resp.status_code})")
-        except Exception as e:
-            print(f"DEBUG PROXY ERROR: {str(e)}")
+    if stream_url:
+        # On redirige vers l'URL d'Apify. Le navigateur client fera le travail.
+        return RedirectResponse(url=stream_url)
 
-    # ANTI-307: Au lieu de RedirectResponse, on renvoie un pixel transparent (Code 200)
-    # Cela évite que le navigateur ne bloque la requête d'image.
-    transparent_pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\x2d\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
-    return Response(content=transparent_pixel, media_type="image/png")
+    # Image de secours (placeholder luxe) si l'URL n'est pas encore prête
+    idle_url = "https://images.unsplash.com/photo-1523170335258-f5ed11844a49?auto=format&fit=crop&q=80&w=1280"
+    return RedirectResponse(url=idle_url)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration LuxSoft pour le Hackathon."""
+    """Pipeline d'orchestration LuxSoft."""
     loop = asyncio.get_event_loop()
-    
     try:
-        # Phase 1: Capture & Extraction
-        # L'agent écrit directement dans active_missions[mission_id]
+        # Phase 1: Capture
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, active_missions, mission_id
         )
         
-        # Persistance immédiate après Phase 1 (URL incluse)
+        # Sauvegarde RAM -> DB
         save_mission(mission_id, active_missions[mission_id])
 
         if dataset_id:
             active_missions[mission_id]["status"] = "analyzing"
             save_mission(mission_id, active_missions[mission_id])
 
-            # Phase 2: Analyse automatisée
+            # Phase 2: Analyse
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, active_missions, mission_id
             )
             
-            # Phase 3: Synthèse du Rapport final
+            # Phase 3: Rapport
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, active_missions
             )
@@ -126,14 +92,10 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             active_missions[mission_id]["report"] = report.dict()
             active_missions[mission_id]["status"] = "completed"
             save_mission(mission_id, active_missions[mission_id])
-            
             print(f"--- SUCCESS: Mission {mission_id} completed ---")
-        else:
-            active_missions[mission_id]["status"] = "failed"
-            save_mission(mission_id, active_missions[mission_id])
             
     except Exception as e:
-        print(f"💥 Runner Critical Failure {mission_id}: {str(e)}")
+        print(f"💥 Runner failure: {str(e)}")
         if mission_id in active_missions:
             active_missions[mission_id]["status"] = "error"
             save_mission(mission_id, active_missions[mission_id])
@@ -144,47 +106,35 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Authentification stricte
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
-
     if received != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     mission_id = str(uuid.uuid4())[:8]
-    
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Deploying Agent. Synchronizing Telemetry..."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Establishing secure uplink..."}],
         "report": None
     }
-    
     active_missions[mission_id] = initial_data
     save_mission(mission_id, initial_data)
-    
     background_tasks.add_task(execute_mission_task, mission_id, request.url, request.goal)
     return {"mission_id": mission_id, "status": "initiated"}
 
 @app.get("/mission-status/{mission_id}")
-async def get_mission_status(
-    mission_id: str, 
-    x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
-):
+async def get_mission_status(mission_id: str, x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")):
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
-
     if received != expected:
          raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Lecture RAM prioritaire pour éviter les lags SQLite
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
-        
     return mission
 
 if __name__ == "__main__":
     import uvicorn
-    # Configuration optimisée pour le plan Starter de Render
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
