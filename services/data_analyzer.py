@@ -1,5 +1,6 @@
 import requests
 import re
+import time
 from config.secrets import get_apify_token
 from models.market_data import MarketOpportunity
 from utils.logger import log
@@ -8,8 +9,8 @@ from services.vector_db import save_opportunity_to_vector_db, ensure_collection_
 
 def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, mission_id=None):
     """
-    Récupère les items Apify, extrait les prix et synchronise 
-    automatiquement les résultats avec la base de données SQLite.
+    Récupère les items Apify avec sécurité de lecture (Retry Logic).
+    Synchronise les résultats avec SQLite et Qdrant.
     """
     if not dataset_id:
         log("⚠️ No Dataset ID provided for analysis.", "ERROR", shared_storage, mission_id)
@@ -26,11 +27,21 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
 
     try:
         log(f"🔍 Fetching raw data from Apify: {dataset_id}", "INFO", shared_storage, mission_id)
-        response = requests.get(dataset_url)
-        raw_items = response.json()
+        
+        # --- SÉCURITÉ : BOUNCER DE LECTURE ---
+        raw_items = []
+        for attempt in range(3):
+            response = requests.get(dataset_url)
+            if response.status_code == 200:
+                raw_items = response.json()
+                if raw_items and len(raw_items) > 0:
+                    break
+            
+            log(f"⏳ Dataset empty or indexing... Retrying in 4s (Attempt {attempt+1}/3)", "INFO", shared_storage, mission_id)
+            time.sleep(4)
 
         if not raw_items:
-            log("📭 Dataset is empty.", "WARNING", shared_storage, mission_id)
+            log("📭 Dataset is definitively empty.", "WARNING", shared_storage, mission_id)
             return []
 
         log(f"📊 Analyzing {len(raw_items)} listings with robust extraction...", "INFO", shared_storage, mission_id)
@@ -40,12 +51,17 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
 
         # 1. Extraction et nettoyage des prix
         for item in raw_items:
+            # On cherche d'abord la clé 'price' (format Puppeteer Scraper)
             price = item.get('price')
-            content = item.get('markdown', '') or item.get('text', '')
+            content = item.get('markdown', '') or item.get('text', '') or item.get('title', '')
             
-            # Fallback regex pour le prix si manquant
+            # Conversion en float si c'est une chaîne
+            if isinstance(price, str):
+                price = float(re.sub(r"[^0-9.]", "", price))
+
+            # Fallback regex pour le prix si manquant ou format invalide
             if not price or price == 0:
-                price_match = re.search(r"(\d{1,3}[\s']?\d{3})", content)
+                price_match = re.search(r"(\d{1,3}[\s']?\d{3})", str(content))
                 if price_match:
                     price = float(price_match.group(1).replace("'", "").replace(" ", ""))
 
@@ -62,7 +78,7 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
             })
 
         # 2. Calcul de la moyenne du marché
-        valid_prices = [d['price'] for d in cleaned_data if d['price'] > 0]
+        valid_prices = [d['price'] for d in cleaned_data if d['price'] > 500] # Seuil minimal
         avg_price = sum(valid_prices) / len(valid_prices) if valid_prices else 0
         
         if avg_price > 0:
@@ -70,7 +86,7 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
 
         # 3. Traitement final et détection d'Arbitrage
         for data in cleaned_data:
-            if data['price'] <= 0:
+            if data['price'] <= 500: # On ignore les accessoires/boites
                 continue
 
             try:
@@ -82,6 +98,7 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
                     condition=data['condition']
                 )
                 
+                # Signal d'opportunité basé sur le seuil (ex: -10%)
                 if avg_price > 0:
                     if opp.listed_price < (avg_price * (1 - threshold)):
                         opp.high_value_signal = True
@@ -89,14 +106,13 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
                         save_opportunity_to_vector_db(opp, mission_id)
                 
                 processed_opportunities.append(opp)
-            except Exception:
+            except Exception as e:
                 continue
 
         # --- SYNCHRONISATION SQLITE FINALE ---
         if mission_id:
             mission_data = load_mission(mission_id)
             if mission_data:
-                # On stocke une version sérialisée des opportunités pour le rapport
                 mission_data["processed_count"] = len(processed_opportunities)
                 save_mission(mission_id, mission_data)
 
