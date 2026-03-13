@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version L'ŒIL (Visuel & Data).
-    Garantit le flux d'images pour le dashboard et capture le HTML pour l'analyse.
+    Orchestrateur LuxSoft - Version SNIPER ELITE.
+    Capture immédiate pour éviter l'écran noir et attente active des données.
     """
     token = get_apify_token()
     if not token:
@@ -20,7 +20,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Initiating FINAL HYBRID UPLINK...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DE L'AGENT PUPPETEER
+        # 1. LANCEMENT DE L'AGENT
         log("Deploying High-Res Puppeteer Core...", "ACTION", shared_storage, mission_id)
         
         data_run = client.actor("apify/puppeteer-scraper").start(
@@ -38,14 +38,27 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
                     // --- B. ATTENTE ACTIVE DU CONTENU ---
                     try {
-                        await page.waitForSelector('.article-item, [data-testid="article-card"], .article-card', { timeout: 15000 });
+                        await page.waitForSelector('.article-item, [data-testid="article-card"]', { timeout: 15000 });
                         log.info('Content detected. Starting extraction.');
                     } catch (e) { 
-                        log.info('Timeout waiting for cards, using fallback scroll.'); 
+                        log.info('Timeout waiting for cards, trying manual scroll.'); 
                     }
 
-                    // --- C. BOUCLE DE NAVIGATION & CAPTURE ---
+                    // --- C. CONTOURNEMENT COOKIES (MAINTENANT CIBLÉ SUR TA CAPTURE) ---
+                    try {
+                        await page.evaluate(() => {
+                            // On cherche par ID (prioritaire), par texte, ou par classe de bouton bleu
+                            const btn = document.querySelector('#consent_prompt_submit') || 
+                                        Array.from(document.querySelectorAll('button'))
+                                        .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter') || b.innerText.includes('Accept'));
+                            if (btn) btn.click();
+                        });
+                        await new Promise(r => setTimeout(r, 2000)); // Pause pour laisser le voile noir partir
+                    } catch (e) { log.info('Cookies handling error or already cleared.'); }
+
+                    // --- D. BOUCLE D'EXTRACTION (12 ÉTAPES) ---
                     for (let i = 0; i < 12; i++) {
+                        // Capture visuelle à chaque étape pour le dashboard
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
@@ -55,19 +68,18 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
 
                             cards.forEach(card => {
                                 const text = card.innerText || "";
-                                // Détection multi-devises pour éviter le 0 rapport
-                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?(CHF|€|\\$|EUR|USD|£)/i);
+                                const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
+                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?CHF/i);
 
-                                if (priceMatch) {
-                                    const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
-                                    const title = titleEl ? titleEl.innerText.trim() : text.split('\\n')[0].substring(0, 40);
+                                if (titleEl && priceMatch) {
+                                    const title = titleEl.innerText.trim();
                                     const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
                                     const itemID = `${title.substring(0,20)}-${cleanPrice}`;
 
                                     const isSub = title.toLowerCase().includes('submariner');
                                     const isDuplicate = alreadySent.includes(itemID);
 
-                                    if (isSub && !isDuplicate && cleanPrice > 4000 && cleanPrice < 60000) {
+                                    if (isSub && !isDuplicate && cleanPrice > 5000 && cleanPrice < 50000) {
                                         foundNow.push({
                                             "id": itemID,
                                             "title": title,
@@ -91,9 +103,9 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                         await new Promise(r => setTimeout(r, 2000));
                     }
                     
-                    // --- D. SAUVEGARDE HTML POUR LE CERVEAU ---
-                    const html = await page.content();
-                    await context.setValue('RAW_HTML', html);
+                    // --- E. SAUVEGARDE TEXTE BRUT (POUR LE CERVEAU DANS MAIN.PY) ---
+                    const fullText = await page.evaluate(() => document.body.innerText);
+                    await context.setValue('RAW_TEXT', fullText);
                     
                     log.info('Mission de navigation et synchronisation terminée.');
                 }""",
@@ -110,7 +122,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         d_run_id = data_run["id"]
         d_store_id = data_run["defaultKeyValueStoreId"]
 
-        # 2. INJECTION DE L'URL DE FLUX POUR LE DASHBOARD
+        # 2. INJECTION DE L'URL DE NOTRE FLUX VISUEL
         native_live_url = f"https://api.apify.com/v2/key-value-stores/{d_store_id}/records/VUE_DIRECTE?token={token}"
         
         if shared_storage and mission_id in shared_storage:
@@ -118,17 +130,17 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             save_mission(mission_id, shared_storage[mission_id])
             log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # 3. MONITORING DU RUN
+        # 3. MONITORING DES LOGS ET STATUT
         while True:
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
-            
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
             time.sleep(2)
 
-        # On renvoie le DatasetId pour l'analyseur classique ET on garde le HTML au cas où
-        return d_details.get("defaultDatasetId") if d_status == "SUCCEEDED" else None
+        # Renvoie le texte brut pour le main.py
+        raw_text_data = client.key_value_store(d_store_id).get_record("RAW_TEXT")
+        return raw_text_data["value"] if raw_text_data else None
             
     except Exception as e:
         log(f"💥 Failure: {str(e)}", "ERROR", shared_storage, mission_id)
