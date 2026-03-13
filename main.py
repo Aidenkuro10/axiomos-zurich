@@ -56,7 +56,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.3.0_PROXY_FINAL",
+        "version": "3.4.0_FORCE_PROXY_FINAL",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -73,17 +73,20 @@ async def proxy_live_image(mission_id: str):
     
     stream_url = mission.get("stream_url")
     
+    # SI ON A UNE URL APIFY, ON ASPIRE LES PIXELS DEPUIS LE SERVEUR
     if stream_url and "apify.com" in stream_url:
         try:
-            # On récupère l'image côté serveur
-            resp = requests.get(stream_url, timeout=5)
+            # On utilise requests pour aspirer l'image (Render -> Apify)
+            resp = requests.get(stream_url, timeout=10)
             if resp.status_code == 200:
-                # On renvoie le contenu binaire avec le bon type MIME
+                # On renvoie le contenu binaire directement (Le navigateur voit l'image comme venant de Render)
                 return Response(content=resp.content, media_type="image/jpeg")
+            else:
+                print(f"DEBUG: Apify source returned {resp.status_code}")
         except Exception as e:
             print(f"DEBUG: Proxy Download Error: {str(e)}")
 
-    # Fallback vers image d'attente si l'uplink n'est pas prêt ou échoue
+    # Fallback vers image d'attente (Unsplash) en cas d'erreur ou d'absence d'URL
     idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
     return RedirectResponse(url=idle_url)
 
