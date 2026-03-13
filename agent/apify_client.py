@@ -6,8 +6,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version HACKATHON STABLE.
-    Gère le flux vidéo natif et synchronise la RAM pour un affichage fluide.
+    Orchestrateur LuxSoft - Version DEMO STABLE.
+    Force l'utilisation de Playwright pour garantir la capture de screenshots.
     """
     token = get_apify_token()
     if not token:
@@ -19,28 +19,36 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Initiating NATIVE LIVE UPLINK...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DE L'AGENT
+        # 1. LANCEMENT DE L'AGENT AVEC CONFIGURATION VISUELLE FORCÉE
         log("Deploying Autonomous Extraction Core...", "ACTION", shared_storage, mission_id)
+        
+        # Configuration optimisée pour le visuel
+        run_input = {
+            "startUrls": [{"url": str(url)}],
+            "query": str(goal),
+            "maxPagesPerCrawl": 1,        # Limité à 1 pour stabiliser le live
+            "maxResults": 3,
+            "proxyConfiguration": {"useApifyProxy": True},
+            # --- PARAMÈTRES CRITIQUES POUR LE FLUX VIDÉO ---
+            "scrapingTool": "playwright", # Force l'ouverture d'un vrai Chrome
+            "dynamicContentWaitSecs": 10, # Force l'agent à rester 10s sur la page (pour le live)
+            "removeCookieWarnings": True
+        }
+
         data_run = client.actor("apify/rag-web-browser").start(
-            run_input={
-                "startUrls": [{"url": str(url)}],
-                "query": str(goal),
-                "maxPagesPerCrawl": 3,
-                "proxyConfiguration": {"useApifyProxy": True}
-            },
-            memory_mbytes=512
+            run_input=run_input,
+            memory_mbytes=1024 # Augmenté pour supporter Playwright/Chrome
         )
         d_run_id = data_run["id"]
 
-        # --- CRITIQUE : DÉLAI D'INITIALISATION POUR LA DÉMO ---
-        # On attend 5 secondes que le container démarre et capture le premier visuel
-        time.sleep(5)
-
-        # 2. INJECTION DE L'URL DE SCREENSHOT DANS LA RAM
+        # 2. INJECTION IMMÉDIATE DE L'URL DANS LA RAM
         if shared_storage is not None and mission_id in shared_storage:
             native_live_url = f"https://api.apify.com/v2/runs/{d_run_id}/screenshots/last?token={token}"
             shared_storage[mission_id]["stream_url"] = native_live_url
             log(f"🚀 NATIVE UPLINK SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
+
+        # Petit délai de sécurité pour laisser le navigateur ouvrir la page
+        time.sleep(3)
 
         last_log_offset = 0
         
@@ -57,8 +65,8 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     for line in new_logs.strip().split('\n'):
                         line_content = line.strip()
                         if line_content:
-                            # Filtrage des logs pour une présentation propre au jury
-                            if any(x in line_content.lower() for x in ["navigating", "extracting", "found", "clicking", "browser", "page"]):
+                            # Filtrage pour le dashboard LuxSoft
+                            if any(x in line_content.lower() for x in ["navigating", "extracting", "found", "clicking", "browser", "page", "waiting"]):
                                 log(f"[AGENT] {line_content}", "INFO", shared_storage, mission_id)
                 last_log_offset = len(full_log)
 
