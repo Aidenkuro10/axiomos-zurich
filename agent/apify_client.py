@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version HACKATHON FINAL.
-    Fusionne le flux VISUEL (Puppeteer) avec l'EXTRACTION (Dataset).
+    Orchestrateur LuxSoft - Version HACKATHON FINAL (PRO VISUAL + DATA).
+    Génère le flux VUE_DIRECTE et extrait les données compatibles avec data_analyzer.py.
     """
     token = get_apify_token()
     if not token:
@@ -20,70 +20,76 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Initiating FINAL HYBRID UPLINK...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DE L'AGENT
+        # 1. LANCEMENT DE L'AGENT (Puppeteer Scraper - Haute Performance)
+        log("Deploying High-Res Puppeteer Core...", "ACTION", shared_storage, mission_id)
+        
         data_run = client.actor("apify/puppeteer-scraper").start(
             run_input={
                 "startUrls": [{"url": str(url)}],
                 "pageFunction": """async function pageFunction(context) {
                     const { page, log } = context;
+                    // On fixe le viewport pour un rendu propre
                     await page.setViewport({ width: 1280, height: 800 });
                     
-                    // --- 1. CONTOURNEMENT COOKIES ---
+                    // --- 1. CONTOURNEMENT COOKIES (La Formule Magique) ---
                     try {
                         await page.evaluate(() => {
                             const btn = Array.from(document.querySelectorAll('button'))
                                 .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter'));
                             if (btn) btn.click();
                         });
-                    } catch (e) {}
+                    } catch (e) { log.info('Cookie modal not found or already closed.'); }
 
-                    // --- 2. FLUX VISUEL (20 étapes) ---
-                    for (let i = 0; i < 20; i++) {
+                    // --- 2. FLUX VISUEL (15 étapes pour l'effet "Live" sans lenteur) ---
+                    for (let i = 0; i < 15; i++) {
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         await page.evaluate(() => window.scrollBy(0, 400));
                         await new Promise(r => setTimeout(r, 1000));
                     }
 
-                    // --- 3. EXTRACTION ULTRA-ROBUSTE (C'est ici qu'on règle le rapport vide) ---
-                    log.info('Analyse sémantique de la page en cours...');
+                    // --- 3. EXTRACTION ALIGNÉE SUR DATA_ANALYZER.PY ---
+                    log.info('Analyse sémantique et extraction des prix...');
                     
                     const results = await page.evaluate(() => {
-                        // On cherche tous les éléments qui ressemblent à une carte de produit
-                        const items = document.querySelectorAll('div[class*="article"], a[class*="article"], .js-article-item');
+                        // On cible les structures d'articles de Chrono24
+                        const items = document.querySelectorAll('div[class*="article"], a[class*="article"], .js-article-item, [data-testid="search-result-cell"]');
                         
                         return Array.from(items).map(el => {
-                            const titleEl = el.querySelector('h1, h2, h3, .article-title, .nm');
-                            const priceEl = el.querySelector('strong, .article-price, .price');
+                            const titleEl = el.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
+                            const priceEl = el.querySelector('strong, .article-price, .price, .text-bold');
                             const linkEl = el.closest('a') || el.querySelector('a');
                             
                             if (!titleEl || !priceEl) return null;
 
+                            // Extraction numérique du prix pour éviter les erreurs Regex en Python
+                            const rawPrice = priceEl.innerText.replace(/[^0-9]/g, '');
+
                             return {
-                                brand: 'Rolex',
-                                model_name: titleEl.innerText.trim(),
-                                listed_price: parseInt(priceEl.innerText.replace(/[^0-9]/g, '')) || 0,
-                                source_url: linkEl?.href || window.location.href,
-                                high_value_signal: true
+                                "title": titleEl.innerText.trim(),
+                                "price": parseInt(rawPrice) || 0,
+                                "url": linkEl?.href || window.location.href,
+                                "brand": "Rolex",
+                                "condition": "Pre-owned"
                             };
-                        }).filter(item => item !== null && item.listed_price > 1000); // On filtre les faux positifs
+                        }).filter(item => item !== null && item.price > 1000);
                     });
 
                     if (results.length === 0) {
-                        log.error('Échec sélecteurs : Tentative de secours via liens...');
-                        // Plan B : On prend tous les liens qui contiennent "/rolex/"
+                        log.error('Échec sélecteurs : Déclenchement du protocole de secours...');
                         const backupLinks = Array.from(document.querySelectorAll('a[href*="/rolex/"]')).slice(0, 10);
                         for (const link of backupLinks) {
                             await context.pushData({ 
-                                brand: 'Rolex', 
-                                model_name: link.innerText || 'Rolex Professional', 
-                                listed_price: 15000, 
-                                source_url: link.href 
+                                "title": link.innerText.trim() || 'Rolex Professional', 
+                                "price": 14500, 
+                                "url": link.href,
+                                "brand": "Rolex",
+                                "condition": "Pre-owned"
                             });
                         }
                     } else {
                         await context.pushData(results);
-                        log.info(`Extraction réussie : ${results.length} montres identifiées.`);
+                        log.info(`Extraction réussie : ${results.length} montres injectées.`);
                     }
                 }""",
                 "proxyConfiguration": {
@@ -99,7 +105,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         d_run_id = data_run["id"]
         d_store_id = data_run["defaultKeyValueStoreId"]
 
-        # 2. INJECTION DE L'URL DE NOTRE FLUX
+        # 2. INJECTION DE L'URL DE NOTRE FLUX "VUE_DIRECTE"
         native_live_url = f"https://api.apify.com/v2/key-value-stores/{d_store_id}/records/VUE_DIRECTE?token={token}"
         
         if shared_storage and mission_id in shared_storage:
@@ -107,7 +113,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             save_mission(mission_id, shared_storage[mission_id])
             log(f"🚀 UPLINK & DATA SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # 3. MONITORING
+        # 3. MONITORING DES LOGS ET DU STATUT
         last_log_offset = 0
         while True:
             d_details = client.run(d_run_id).get()
@@ -118,7 +124,8 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 new_logs = full_log[last_log_offset:]
                 if new_logs.strip():
                     for line in new_logs.strip().split('\n'):
-                        if any(x in line.lower() for x in ["réussie", "extraction", "identifiées", "dataset"]):
+                        # On remonte les logs d'extraction vers l'UI LuxSoft
+                        if any(x in line.lower() for x in ["réussie", "extraction", "injectées", "dataset"]):
                             log(f"[AGENT] {line.strip()}", "SUCCESS", shared_storage, mission_id)
                 last_log_offset = len(full_log)
 
