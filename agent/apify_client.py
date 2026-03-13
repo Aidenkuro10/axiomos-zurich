@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version SNIPER STRATÉGIQUE.
-    Cible uniquement les containers d'annonces réels pour éviter le bruit marketing.
+    Orchestrateur LuxSoft - Version SNIPER ELITE.
+    Capture immédiate pour éviter l'écran noir et attente active des données.
     """
     token = get_apify_token()
     if not token:
@@ -32,30 +32,40 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     
                     const sentItems = new Set();
 
+                    // --- A. CAPTURE IMMÉDIATE (ANTI-ÉCRAN NOIR) ---
+                    const firstShot = await page.screenshot();
+                    await context.setValue('VUE_DIRECTE', firstShot, { contentType: 'image/png' });
+
+                    // --- B. ATTENTE ACTIVE DU CONTENU ---
+                    try {
+                        await page.waitForSelector('.article-item, [data-testid="article-card"]', { timeout: 15000 });
+                        log.info('Content detected. Starting extraction.');
+                    } catch (e) { 
+                        log.info('Timeout waiting for cards, trying manual scroll.'); 
+                    }
+
+                    // --- C. CONTOURNEMENT COOKIES ---
                     try {
                         await page.evaluate(() => {
                             const btn = Array.from(document.querySelectorAll('button'))
                                 .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter') || b.innerText.includes('Accept'));
                             if (btn) btn.click();
                         });
-                    } catch (e) { log.info('Cookies handled.'); }
+                    } catch (e) { log.info('Cookies already handled.'); }
 
+                    // --- D. BOUCLE D'EXTRACTION ---
                     for (let i = 0; i < 12; i++) {
-                        // A. Capture visuelle pour le Dashboard (VUE_DIRECTE)
+                        // Capture visuelle à chaque étape
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        // B. EXTRACTION CIBLÉE (MODE SNIPER)
                         const visibleItems = await page.evaluate((alreadySent) => {
-                            // On cible UNIQUEMENT les vraies cartes de produits Chrono24
-                            const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card');
+                            const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card, div[class*="item"]');
                             const foundNow = [];
 
                             cards.forEach(card => {
                                 const text = card.innerText || "";
                                 const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
-                                
-                                // On cherche un prix uniquement à l'intérieur de la carte
                                 const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?CHF/i);
 
                                 if (titleEl && priceMatch) {
@@ -63,11 +73,10 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                                     const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
                                     const itemID = `${title.substring(0,20)}-${cleanPrice}`;
 
-                                    // FILTRE DE PRÉCISION : Submariner + Prix Réaliste (entre 5k et 50k)
-                                    // Cela évite de choper les articles de blog à 91k CHF.
                                     const isSub = title.toLowerCase().includes('submariner');
                                     const isDuplicate = alreadySent.includes(itemID);
 
+                                    // Filtre Sniper : Submariner entre 5k et 50k
                                     if (isSub && !isDuplicate && cleanPrice > 5000 && cleanPrice < 50000) {
                                         foundNow.push({
                                             "id": itemID,
@@ -88,7 +97,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                             await context.pushData(visibleItems);
                         }
 
-                        // C. Scroll et pause pour le chargement
                         await page.evaluate(() => window.scrollBy(0, 800));
                         await new Promise(r => setTimeout(r, 2000));
                     }
