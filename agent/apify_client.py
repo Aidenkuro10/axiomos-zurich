@@ -6,8 +6,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version LIVE VIDEO.
-    Bypasse le cache des screenshots pour un flux visuel dynamique.
+    Orchestrateur LuxSoft - Version HACKATHON REAL-TIME.
+    Écrit l'URL de stream et les logs directement dans la RAM pour un affichage instantané.
     """
     token = get_apify_token()
     if not token:
@@ -19,48 +19,38 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Initiating NATIVE LIVE UPLINK...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DE L'AGENT
+        # 1. LANCEMENT DE L'AGENT DATA
+        # On utilise .start() pour avoir le d_run_id tout de suite
         log("Deploying Autonomous Extraction Core...", "ACTION", shared_storage, mission_id)
-        
-        run_input = {
-            "startUrls": [{"url": str(url)}],
-            "query": str(goal),
-            "maxPagesPerCrawl": 1,        
-            "maxResults": 3,
-            "proxyConfiguration": {"useApifyProxy": True},
-            "scrapingTool": "browser-playwright", 
-            "dynamicContentWaitSecs": 10, 
-            "removeCookieWarnings": True,
-            # Force la capture d'écran pour chaque page visitée
-            "saveScreenshot": True 
-        }
-
         data_run = client.actor("apify/rag-web-browser").start(
-            run_input=run_input,
-            memory_mbytes=1024 
+            run_input={
+                "startUrls": [{"url": str(url)}],
+                "query": str(goal),
+                "maxPagesPerCrawl": 3,
+                "proxyConfiguration": {"useApifyProxy": True}
+            },
+            memory_mbytes=512
         )
         d_run_id = data_run["id"]
-        default_kv_store = data_run["defaultKeyValueStoreId"]
 
-        # 2. CONFIGURATION DE L'URL LIVE (KV STORE BYPASS)
-        # On pointe directement vers le KV Store qui est mis à jour plus souvent que l'API de screenshots
+        # 2. INJECTION IMMÉDIATE DE L'URL DANS LA RAM
+        # On ne passe plus par la DB ici, on injecte dans le dictionnaire partagé
         if shared_storage is not None and mission_id in shared_storage:
-            # On utilise le store ID spécifique de ce run pour éviter tout conflit
-            native_live_url = f"https://api.apify.com/v2/key-value-stores/{default_kv_store}/records/last-screenshot.jpg?token={token}"
+            native_live_url = f"https://api.apify.com/v2/runs/{d_run_id}/screenshots/last?token={token}"
             shared_storage[mission_id]["stream_url"] = native_live_url
+            # Pas de save_mission ici : le main.py (version 3.5.0) lit la RAM en priorité
             log(f"🚀 NATIVE UPLINK SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
-
-        # Laisser le temps à Playwright de boot
-        time.sleep(5)
 
         last_log_offset = 0
         
-        # 3. BOUCLE DE MONITORING
+        # 3. BOUCLE DE MONITORING (Logs + Statut)
         while True:
+            # Récupération de l'état du Run
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
             
-            # --- TÉLÉMÉTRIE LOGS ---
+            # --- MISE À JOUR DES LOGS EN TEMPS RÉEL ---
+            # On récupère les logs et on les injecte dans shared_storage via la fonction log
             full_log = client.log(d_run_id).get()
             if full_log:
                 new_logs = full_log[last_log_offset:]
@@ -68,16 +58,17 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     for line in new_logs.strip().split('\n'):
                         line_content = line.strip()
                         if line_content:
-                            # Filtrage intelligent pour ne garder que les actions "visuelles"
-                            if any(x in line_content.lower() for x in ["navigating", "extracting", "found", "clicking", "browser", "page", "waiting", "screenshot"]):
+                            # Filtrage pour ne garder que les logs d'action pour le jury
+                            if any(x in line_content.lower() for x in ["navigating", "extracting", "found", "clicking", "browser"]):
                                 log(f"[AGENT] {line_content}", "INFO", shared_storage, mission_id)
                 last_log_offset = len(full_log)
 
+            # Vérification de fin de mission
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
             
-            # On réduit un peu la fréquence de polling pour éviter que Render ne freeze le CPU
-            time.sleep(2.5)
+            # Pause courte pour un live réactif (1.5s)
+            time.sleep(1.5)
 
         # 4. FINALISATION
         if d_status == "SUCCEEDED":
