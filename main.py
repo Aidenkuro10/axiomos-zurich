@@ -56,7 +56,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.0.0_IMGBB_UPLINK",
+        "version": "3.1.0_STABLE_UPLINK",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -82,10 +82,11 @@ async def proxy_live_image(mission_id: str):
     return RedirectResponse(url=idle_url)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration avec bypass ImgBB."""
+    """Pipeline d'orchestration avec synchronisation RAM -> DB."""
     loop = asyncio.get_event_loop()
     
     initial_state = load_mission(mission_id)
+    # shared_ref servira de pont mémoire avec apify_client
     shared_ref = {mission_id: initial_state}
 
     try:
@@ -94,6 +95,12 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
+        # --- SYNC POINT: Sauvegarde du stream_url mis à jour dans shared_ref ---
+        updated_in_ram = shared_ref.get(mission_id)
+        if updated_in_ram and updated_in_ram.get("stream_url"):
+            save_mission(mission_id, updated_in_ram)
+            print(f"DEBUG: stream_url synchronisé vers DB: {updated_in_ram.get('stream_url')}")
+
         current_state = load_mission(mission_id)
 
         if dataset_id:
