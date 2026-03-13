@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version SNIPER ELITE.
-    Capture immédiate pour éviter l'écran noir et attente active des données.
+    Orchestrateur LuxSoft - Version UNIVERSAL SNIPER.
+    Capture immédiate, attente active et détection multi-devises.
     """
     token = get_apify_token()
     if not token:
@@ -33,54 +33,43 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     const sentItems = new Set();
 
                     // --- A. CAPTURE IMMÉDIATE (ANTI-ÉCRAN NOIR) ---
-                    // Envoie une image dès la première seconde de run
                     const firstShot = await page.screenshot();
                     await context.setValue('VUE_DIRECTE', firstShot, { contentType: 'image/png' });
 
                     // --- B. ATTENTE ACTIVE DU CONTENU ---
-                    // Force l'agent à attendre que les montres soient affichées avant d'extraire
                     try {
-                        await page.waitForSelector('.article-item, [data-testid="article-card"]', { timeout: 15000 });
+                        await page.waitForSelector('.article-item, [data-testid="article-card"], .article-card', { timeout: 15000 });
                         log.info('Content detected. Starting extraction.');
                     } catch (e) { 
-                        log.info('Timeout waiting for cards, trying manual scroll.'); 
+                        log.info('Timeout waiting for specific cards, trying general extraction.'); 
                     }
 
-                    // --- C. CONTOURNEMENT COOKIES ---
-                    try {
-                        await page.evaluate(() => {
-                            const btn = Array.from(document.querySelectorAll('button'))
-                                .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter') || b.innerText.includes('Accept'));
-                            if (btn) btn.click();
-                        });
-                    } catch (e) { log.info('Cookies already handled.'); }
-
-                    // --- D. BOUCLE D'EXTRACTION (12 ÉTAPES) ---
+                    // --- C. BOUCLE D'EXTRACTION ---
                     for (let i = 0; i < 12; i++) {
-                        // Capture visuelle à chaque étape pour le dashboard
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
                         const visibleItems = await page.evaluate((alreadySent) => {
-                            // On cible les cartes d'annonces réelles
+                            // On cible les cartes d'annonces ou les conteneurs de produits
                             const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card, div[class*="item"]');
                             const foundNow = [];
 
                             cards.forEach(card => {
                                 const text = card.innerText || "";
-                                const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
-                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?CHF/i);
-
-                                if (titleEl && priceMatch) {
-                                    const title = titleEl.innerText.trim();
+                                // DÉTECTION UNIVERSELLE : On cherche n'importe quelle devise (CHF, €, $, £)
+                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?(CHF|€|\\$|£|EUR|USD)/i);
+                                
+                                if (priceMatch) {
                                     const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
+                                    const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
+                                    const title = titleEl ? titleEl.innerText.trim() : text.split('\\n')[0].substring(0, 50).trim();
+                                    
                                     const itemID = `${title.substring(0,20)}-${cleanPrice}`;
-
                                     const isSub = title.toLowerCase().includes('submariner');
                                     const isDuplicate = alreadySent.includes(itemID);
 
-                                    // Filtre Stratégique : Submariner entre 5k et 50k (ignore le bruit marketing)
-                                    if (isSub && !isDuplicate && cleanPrice > 5000 && cleanPrice < 50000) {
+                                    // Filtre : Submariner entre 4k et 60k (fourchette luxe large)
+                                    if (isSub && !isDuplicate && cleanPrice > 4000 && cleanPrice < 60000) {
                                         foundNow.push({
                                             "id": itemID,
                                             "title": title,
@@ -95,13 +84,11 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                             return foundNow;
                         }, Array.from(sentItems));
 
-                        // On pousse les données uniques vers le dataset
                         if (visibleItems.length > 0) {
                             visibleItems.forEach(item => sentItems.add(item.id));
                             await context.pushData(visibleItems);
                         }
 
-                        // Scroll pour découvrir de nouvelles montres
                         await page.evaluate(() => window.scrollBy(0, 800));
                         await new Promise(r => setTimeout(r, 2000));
                     }
@@ -121,7 +108,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         d_run_id = data_run["id"]
         d_store_id = data_run["defaultKeyValueStoreId"]
 
-        # 2. INJECTION DE L'URL DE NOTRE FLUX VISUEL
         native_live_url = f"https://api.apify.com/v2/key-value-stores/{d_store_id}/records/VUE_DIRECTE?token={token}"
         
         if shared_storage and mission_id in shared_storage:
@@ -129,7 +115,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             save_mission(mission_id, shared_storage[mission_id])
             log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # 3. MONITORING DES LOGS ET STATUT
         last_log_offset = 0
         while True:
             d_details = client.run(d_run_id).get()
