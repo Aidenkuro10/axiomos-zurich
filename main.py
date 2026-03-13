@@ -16,6 +16,7 @@ from services.data_analyzer import analyze_market_deals
 from services.report_builder import generate_final_report
 from config.secrets import AXIOMOS_INTERNAL_AUTH, get_apify_token
 from utils.database import init_db, save_mission, load_mission
+from utils.logger import log
 
 # Initialisation de la base de données au démarrage
 init_db()
@@ -38,11 +39,9 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    """Diagnostic de survie pour vérifier la persistance SQLite."""
     import sqlite3
     mission_count = 0
     db_status = "NOT_FOUND"
-    
     if os.path.exists("luxsoft_persistence.db"):
         db_status = "ACTIVE"
         try:
@@ -52,11 +51,10 @@ def read_root():
             conn.close()
         except:
             db_status = "CORRUPTED"
-
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.4.0_PUPPETEER_HD",
+        "version": "3.6.0_STABLE_UPLINK",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -64,8 +62,8 @@ def read_root():
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    PROXY ACTIF: Télécharge l'image VUE_DIRECTE depuis Apify.
-    Bypasse les sécurités CORS et rafraîchit le flux visuel.
+    PROXY SYNCHRONE (STABLE): Utilise requests pour garantir l'affichage 
+    du flux Puppeteer sans les erreurs de timeout de httpx.
     """
     mission = load_mission(mission_id)
     if not mission:
@@ -75,51 +73,50 @@ async def proxy_live_image(mission_id: str):
     
     if stream_url and "apify.com" in stream_url:
         try:
-            # Timeout augmenté à 15s pour les captures Puppeteer plus lourdes
-            resp = requests.get(stream_url, timeout=15)
+            # On garde requests ici car c'est ce qui marchait pour tes images
+            resp = requests.get(stream_url, timeout=10)
             if resp.status_code == 200:
-                # Utilisation de image/png pour une netteté maximale des textes
                 return Response(content=resp.content, media_type="image/png")
-            else:
-                print(f"DEBUG: Apify Uplink Status {resp.status_code}")
         except Exception as e:
-            print(f"DEBUG: Proxy Download Error: {str(e)}")
+            print(f"DEBUG: Proxy Error: {str(e)}")
 
-    # Fallback vers image d'attente (LuxSoft Branding)
     idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
     return RedirectResponse(url=idle_url)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration avec synchronisation RAM -> DB."""
+    """Pipeline d'orchestration avec pause de synchronisation forcée."""
     loop = asyncio.get_event_loop()
-    
     initial_state = load_mission(mission_id)
     shared_ref = {mission_id: initial_state}
 
     try:
-        # Phase 1: Capture Visuelle & Extraction Data (Puppeteer Engine)
+        # Phase 1: Automation (L'agent travaille)
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # --- SYNC POINT: Sauvegarde du stream_url mis à jour ---
+        # --- POINT CRITIQUE : PAUSE DE SYNCHRONISATION ---
+        # On attend 12 secondes pour que les serveurs Apify finissent d'écrire le Dataset.
+        # C'est ce qui évite d'avoir un rapport "0 items".
+        log(f"Mission {mission_id}: Syncing cloud data... (12s)", "INFO", shared_ref, mission_id)
+        await asyncio.sleep(12)
+        
+        # Sauvegarde du stream_url final
         updated_in_ram = shared_ref.get(mission_id)
-        if updated_in_ram and updated_in_ram.get("stream_url"):
+        if updated_in_ram:
             save_mission(mission_id, updated_in_ram)
-            print(f"DEBUG: Uplink VUE_DIRECTE synchronisé: {mission_id}")
-
-        current_state = load_mission(mission_id)
 
         if dataset_id:
+            current_state = load_mission(mission_id)
             current_state["status"] = "analyzing"
             save_mission(mission_id, current_state)
 
-            # Phase 2: Analyse du Dataset
+            # Phase 2: Analyse
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, shared_ref, mission_id
             )
             
-            # Phase 3: Génération du Rapport
+            # Phase 3: Rapport
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, shared_ref
             )
@@ -148,14 +145,13 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
+    received = str(x_axiomos_auth or "").strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
     if received != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     mission_id = str(uuid.uuid4())[:8]
-    
     initial_data = {
         "status": "running",
         "stream_url": None, 
@@ -163,7 +159,6 @@ async def start_mission(
         "report": None
     }
     save_mission(mission_id, initial_data)
-    
     background_tasks.add_task(execute_mission_task, mission_id, request.url, request.goal)
     return {"mission_id": mission_id, "status": "initiated"}
 
@@ -172,16 +167,14 @@ async def get_mission_status(
     mission_id: str, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
+    received = str(x_axiomos_auth or "").strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
-
     if received != expected:
          raise HTTPException(status_code=401, detail="Unauthorized")
 
     mission = load_mission(mission_id)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
-        
     return mission
 
 if __name__ == "__main__":
