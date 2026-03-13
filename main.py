@@ -56,7 +56,7 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "3.3.0_PROXY_FINAL",
+        "version": "3.4.0_PUPPETEER_HD",
         "database": db_status,
         "persisted_missions": mission_count
     }
@@ -64,8 +64,8 @@ def read_root():
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
     """
-    PROXY ACTIF: Télécharge l'image depuis Apify et la sert en direct.
-    Bypasse les sécurités CORS et Referrer-Policy du navigateur.
+    PROXY ACTIF: Télécharge l'image VUE_DIRECTE depuis Apify.
+    Bypasse les sécurités CORS et rafraîchit le flux visuel.
     """
     mission = load_mission(mission_id)
     if not mission:
@@ -75,15 +75,17 @@ async def proxy_live_image(mission_id: str):
     
     if stream_url and "apify.com" in stream_url:
         try:
-            # On récupère l'image côté serveur
-            resp = requests.get(stream_url, timeout=5)
+            # Timeout augmenté à 15s pour les captures Puppeteer plus lourdes
+            resp = requests.get(stream_url, timeout=15)
             if resp.status_code == 200:
-                # On renvoie le contenu binaire avec le bon type MIME
-                return Response(content=resp.content, media_type="image/jpeg")
+                # Utilisation de image/png pour une netteté maximale des textes
+                return Response(content=resp.content, media_type="image/png")
+            else:
+                print(f"DEBUG: Apify Uplink Status {resp.status_code}")
         except Exception as e:
             print(f"DEBUG: Proxy Download Error: {str(e)}")
 
-    # Fallback vers image d'attente si l'uplink n'est pas prêt ou échoue
+    # Fallback vers image d'attente (LuxSoft Branding)
     idle_url = "https://images.unsplash.com/photo-1547996160-81dfa63595dd?auto=format&fit=crop&q=80&w=1280"
     return RedirectResponse(url=idle_url)
 
@@ -95,16 +97,16 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
     shared_ref = {mission_id: initial_state}
 
     try:
-        # Phase 1: Capture Visuelle & Extraction Data
+        # Phase 1: Capture Visuelle & Extraction Data (Puppeteer Engine)
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # --- SYNC POINT: Sauvegarde du stream_url mis à jour dans shared_ref ---
+        # --- SYNC POINT: Sauvegarde du stream_url mis à jour ---
         updated_in_ram = shared_ref.get(mission_id)
         if updated_in_ram and updated_in_ram.get("stream_url"):
             save_mission(mission_id, updated_in_ram)
-            print(f"DEBUG: stream_url synchronisé vers DB: {updated_in_ram.get('stream_url')}")
+            print(f"DEBUG: Uplink VUE_DIRECTE synchronisé: {mission_id}")
 
         current_state = load_mission(mission_id)
 
