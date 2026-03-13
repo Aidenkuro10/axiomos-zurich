@@ -21,28 +21,31 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         log("Deploying Professional Crawler Engine...", "ACTION", shared_storage, mission_id)
         
         # On utilise Website Content Crawler (apify/website-content-crawler)
-        # C'est l'acteur à 108K utilisations qui gère parfaitement le rendu visuel
+        # On force la capture et on configure le crawler pour être le plus "humain" possible
         run_input = {
             "startUrls": [{"url": str(url)}],
             "maxCrawlPages": 2,
-            "crawlerType": "playwright:firefox", # Firefox bypass souvent mieux les protections anti-bot
+            "crawlerType": "playwright:firefox", 
             "saveScreenshots": True,
             "performSelfCheck": False,
             "proxyConfiguration": {"useApifyProxy": True},
-            "htmlTransformer": "readableText", # Optimisé pour ton analyse de prix
+            "htmlTransformer": "readableText",
             "initialConcurrency": 1,
             "maxConcurrency": 1,
-            "requestHandlerTimeoutSecs": 60
+            "requestHandlerTimeoutSecs": 60,
+            # Paramètres additionnels pour stabiliser le rendu visuel
+            "dynamicContentWaitSecs": 10,
+            "snapshotFullscreen": True
         }
 
         data_run = client.actor("apify/website-content-crawler").start(
             run_input=run_input,
-            memory_mbytes=1024
+            memory_mbytes=2048 # Augmenté à 2Go pour supporter le rendu Firefox sans crash
         )
         d_run_id = data_run["id"]
 
-        # PAUSE INITIALE : Indispensable pour laisser le container démarrer
-        time.sleep(8)
+        # Pause initiale de 10 secondes pour l'initialisation du moteur
+        time.sleep(10)
 
         last_log_offset = 0
         
@@ -55,7 +58,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             # --- MISE À JOUR DU VISUEL (URL UNIVERSELLE APIFY) ---
             if shared_storage is not None and mission_id in shared_storage:
                 ts = int(time.time() * 10)
-                # Cette route d'API renvoie TOUJOURS le dernier screenshot capturé par l'acteur
+                # Lien direct vers la dernière capture d'écran disponible
                 shared_storage[mission_id]["stream_url"] = f"https://api.apify.com/v2/runs/{d_run_id}/screenshots/last?token={token}&t={ts}"
 
             # --- MISE À JOUR DES LOGS ---
@@ -66,7 +69,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     for line in new_logs.strip().split('\n'):
                         line_content = line.strip()
                         if line_content:
-                            # Filtrage des logs pour ne garder que l'essentiel
                             if any(x in line_content.lower() for x in ["navigating", "request", "screenshot", "page", "browser"]):
                                 log(f"[CRAWLER] {line_content}", "INFO", shared_storage, mission_id)
                 last_log_offset = len(full_log)
@@ -74,7 +76,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
             
-            # Pause de 4s pour laisser le temps au screenshot de s'écrire sur le disque d'Apify
             time.sleep(4.0)
 
         # 3. FINALISATION
