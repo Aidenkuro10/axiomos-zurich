@@ -3,11 +3,10 @@ import time
 import asyncio
 import os
 import requests
-import json
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -21,7 +20,7 @@ from utils.database import init_db, save_mission, load_mission
 # Initialisation de la base de données au démarrage
 init_db()
 
-app = FastAPI(title="LuxSoft Engine - Visual Uplink Edition")
+app = FastAPI(title="LuxSoft Luxury Arbitrage Engine")
 executor = ThreadPoolExecutor(max_workers=10)
 
 # --- CACHE MÉMOIRE GLOBAL ---
@@ -39,81 +38,61 @@ class MissionRequest(BaseModel):
     url: str
     goal: str
 
+@app.head("/")
 @app.get("/")
 def read_root():
+    """Diagnostic de survie."""
+    import sqlite3
+    mission_count = 0
+    db_status = "NOT_FOUND"
+    
+    if os.path.exists("luxsoft_persistence.db"):
+        db_status = "ACTIVE"
+        try:
+            conn = sqlite3.connect("luxsoft_persistence.db")
+            cursor = conn.execute("SELECT COUNT(*) FROM missions")
+            mission_count = cursor.fetchone()[0]
+            conn.close()
+        except:
+            db_status = "CORRUPTED"
+
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "4.2.5_STABLE_STREAM",
-        "engine": "Axiomos Visual Pipeline"
+        "version": "3.8.0_DIRECT_UPLINK_TEST",
+        "database": db_status,
+        "persisted_missions": mission_count
     }
-
-# --- ARCHITECTURE TINYFIX : LE FLUX SSE ---
-@app.get("/stream-uplink/{mission_id}")
-async def stream_uplink(mission_id: str):
-    """
-    ROUTE CRITIQUE : Simule le mode SSE de TinyFix.
-    Maintient le tunnel ouvert entre Render et le Frontend.
-    """
-    async def event_generator():
-        last_url = None
-        # On garde le flux ouvert pendant 180 cycles (environ 6 minutes)
-        for _ in range(180):
-            mission = active_missions.get(mission_id)
-            if not mission:
-                # Si non en RAM, on tente de charger depuis SQLite
-                mission = load_mission(mission_id)
-                if not mission: break
-            
-            current_url = mission.get("stream_url")
-            
-            # 1. Envoi de l'URL si elle a changé
-            if current_url and current_url != last_url:
-                last_url = current_url
-                payload = {"type": "STREAMING_URL", "url": current_url, "ts": time.time()}
-                yield f"data: {json.dumps(payload)}\n\n"
-            
-            # 2. Envoi des logs en temps réel
-            logs = mission.get("live_logs", [])
-            if logs:
-                yield f"data: {json.dumps({'type': 'LOGS', 'data': logs[-1]})}\n\n"
-            
-            # 3. Heartbeat pour Render (Crucial)
-            yield "data: {\"type\": \"HEARTBEAT\"}\n\n"
-            
-            # 4. Condition de sortie
-            if mission.get("status") in ["completed", "failed", "error"]:
-                final_payload = {"type": "COMPLETE", "status": mission.get("status")}
-                yield f"data: {json.dumps(final_payload)}\n\n"
-                break
-                
-            await asyncio.sleep(2)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
-    """Relais binaire pour bypasser les sécurités CORS et le cache navigateur."""
+    """
+    OBSOLETE: On garde la route pour ne pas casser le code existant,
+    mais on va privilégier le Direct-Link côté Frontend.
+    """
     mission = active_missions.get(mission_id) or load_mission(mission_id)
-    if not mission or not mission.get("stream_url"):
+    if not mission:
         return Response(status_code=404)
     
-    try:
-        # On ajoute un paramètre de cache-busting interne pour Apify
-        apify_url = f"{mission['stream_url']}&nocache={time.time()}"
-        resp = requests.get(apify_url, timeout=5)
-        if resp.status_code == 200:
-            return Response(content=resp.content, media_type="image/jpeg")
-    except Exception as e:
-        print(f"Proxy Error: {e}")
-    
-    return Response(status_code=404)
+    stream_url = mission.get("stream_url")
+    if stream_url and "apify.com" in stream_url:
+        try:
+            resp = requests.get(stream_url, timeout=10)
+            if resp.status_code == 200 and len(resp.content) > 500:
+                return Response(content=resp.content, media_type="image/jpeg")
+        except Exception as e:
+            print(f"DEBUG PROXY ERROR: {str(e)}")
+
+    transparent_pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\x2d\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+    return Response(content=transparent_pixel, media_type="image/png")
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Orchestrateur asynchrone."""
+    """Pipeline d'orchestration LuxSoft."""
     loop = asyncio.get_event_loop()
+    
     try:
-        # Phase 1: Navigation & Capture (Apify)
+        # Phase 1: Capture & Extraction
+        # L'agent doit injecter le 'run_id' dans active_missions[mission_id]
         dataset_id = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, active_missions, mission_id
         )
@@ -122,17 +101,27 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
 
         if dataset_id:
             active_missions[mission_id]["status"] = "analyzing"
+            save_mission(mission_id, active_missions[mission_id])
+
             deals = await loop.run_in_executor(
                 executor, analyze_market_deals, dataset_id, 0.10, active_missions, mission_id
             )
+            
             report = await loop.run_in_executor(
                 executor, generate_final_report, mission_id, deals, active_missions
             )
-            active_missions[mission_id].update({"report": report.dict(), "status": "completed"})
+            
+            active_missions[mission_id]["report"] = report.dict()
+            active_missions[mission_id]["status"] = "completed"
             save_mission(mission_id, active_missions[mission_id])
-            print(f"--- SUCCESS: Mission {mission_id} finalized ---")
+            
+            print(f"--- SUCCESS: Mission {mission_id} completed ---")
+        else:
+            active_missions[mission_id]["status"] = "failed"
+            save_mission(mission_id, active_missions[mission_id])
+            
     except Exception as e:
-        print(f"Critical Failure {mission_id}: {str(e)}")
+        print(f"💥 Runner Critical Failure {mission_id}: {str(e)}")
         if mission_id in active_missions:
             active_missions[mission_id]["status"] = "error"
             save_mission(mission_id, active_missions[mission_id])
@@ -143,7 +132,6 @@ async def start_mission(
     background_tasks: BackgroundTasks, 
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
-    # Authentification stricte
     received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
     expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
 
@@ -151,22 +139,37 @@ async def start_mission(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     mission_id = str(uuid.uuid4())[:8]
-    active_missions[mission_id] = {
+    
+    initial_data = {
         "status": "running",
-        "run_id": None,
+        "run_id": None, # Initialisé à vide, sera rempli par l'agent
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Mission Initiated. Opening Tunnel..."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Deploying Agent. Synchronizing Telemetry..."}],
         "report": None
     }
+    
+    active_missions[mission_id] = initial_data
+    save_mission(mission_id, initial_data)
     
     background_tasks.add_task(execute_mission_task, mission_id, request.url, request.goal)
     return {"mission_id": mission_id, "status": "initiated"}
 
 @app.get("/mission-status/{mission_id}")
-async def get_mission_status(mission_id: str):
+async def get_mission_status(
+    mission_id: str, 
+    x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
+):
+    received = str(x_axiomos_auth).strip().replace('"', '').replace("'", "")
+    expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
+
+    if received != expected:
+         raise HTTPException(status_code=401, detail="Unauthorized")
+
     mission = active_missions.get(mission_id) or load_mission(mission_id)
     if not mission:
-        raise HTTPException(status_code=404)
+        raise HTTPException(status_code=404, detail="Mission not found")
+        
+    # On s'assure de renvoyer le run_id pour le direct-link frontend
     return mission
 
 if __name__ == "__main__":
