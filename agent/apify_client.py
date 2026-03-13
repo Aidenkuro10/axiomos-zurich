@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version HACKATHON STABLE (LIVE + AUTO-SYNC).
-    Force l'extraction pendant le scroll pour éviter les datasets vides en fin de page.
+    Orchestrateur LuxSoft - Version PRO LIVE (Turbo Sync).
+    Optimisé pour l'affichage instantané et la persistence garantie des données.
     """
     token = get_apify_token()
     if not token:
@@ -18,7 +18,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     client = ApifyClient(token)
     
     try:
-        log(f"Mission {mission_id}: Initiating FINAL HYBRID UPLINK...", "INFO", shared_storage, mission_id)
+        log(f"Mission {mission_id}: Initiating TURBO HYBRID UPLINK...", "INFO", shared_storage, mission_id)
         
         # 1. LANCEMENT DE L'AGENT
         log("Deploying High-Res Puppeteer Core...", "ACTION", shared_storage, mission_id)
@@ -30,23 +30,26 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     const { page, log } = context;
                     await page.setViewport({ width: 1280, height: 800 });
                     
-                    // --- 1. CONTOURNEMENT COOKIES ---
+                    // --- 1. CAPTURE INSTANTANÉE (Supprime les 40s d'attente) ---
+                    const initialShot = await page.screenshot();
+                    await context.setValue('VUE_DIRECTE', initialShot, { contentType: 'image/png' });
+
+                    // --- 2. CONTOURNEMENT COOKIES ---
                     try {
                         await page.evaluate(() => {
                             const btn = Array.from(document.querySelectorAll('button'))
                                 .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter'));
                             if (btn) btn.click();
                         });
-                    } catch (e) { log.info('Cookies already handled.'); }
+                    } catch (e) { log.info('Cookies handled or not found.'); }
 
-                    // --- 2. BOUCLE LIVE + EXTRACTION CONTINUE ---
-                    // On réduit à 12 étapes pour optimiser le temps (environ 1m15 de run)
+                    // --- 3. BOUCLE LIVE + EXTRACTION CONTINUE ---
                     for (let i = 0; i < 12; i++) {
                         // A. Capture visuelle pour le Dashboard
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        // B. EXTRACTION IMMÉDIATE de ce qui est visible à l'écran
+                        // B. EXTRACTION IMMÉDIATE
                         const visibleItems = await page.evaluate(() => {
                             const cards = document.querySelectorAll('.article-item, [data-testid="search-result-cell"]');
                             return Array.from(cards).map(el => {
@@ -67,17 +70,18 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                             }).filter(item => item !== null && item.price > 1000);
                         });
 
-                        // On pousse les données au fur et à mesure (évite le dataset vide à la fin)
                         if (visibleItems.length > 0) {
                             await context.pushData(visibleItems);
                         }
 
-                        // C. Scroll pour la suite
+                        // C. Scroll nerveux
                         await page.evaluate(() => window.scrollBy(0, 500));
-                        await new Promise(r => setTimeout(r, 1200));
+                        await new Promise(r => setTimeout(r, 600)); 
                     }
                     
-                    log.info('Mission de navigation et synchronisation terminée.');
+                    // --- 4. SÉCURITÉ DE PERSISTENCE ---
+                    log.info('Finalizing data sync before exit...');
+                    await new Promise(r => setTimeout(r, 3000));
                 }""",
                 "proxyConfiguration": {
                     "useApifyProxy": True,
@@ -92,13 +96,13 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         d_run_id = data_run["id"]
         d_store_id = data_run["defaultKeyValueStoreId"]
 
-        # 2. INJECTION DE L'URL DE NOTRE FLUX
+        # 2. INJECTION DE L'URL DU FLUX
         native_live_url = f"https://api.apify.com/v2/key-value-stores/{d_store_id}/records/VUE_DIRECTE?token={token}"
         
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = native_live_url
             save_mission(mission_id, shared_storage[mission_id])
-            log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
+            log(f"🚀 TURBO UPLINK SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
         # 3. MONITORING
         last_log_offset = 0
@@ -111,7 +115,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 new_logs = full_log[last_log_offset:]
                 if new_logs.strip():
                     for line in new_logs.strip().split('\n'):
-                        if any(x in line.lower() for x in ["terminée", "extraction", "dataset", "montres"]):
+                        if any(x in line.lower() for x in ["finalizing", "extraction", "dataset", "montres"]):
                             log(f"[AGENT] {line.strip()}", "SUCCESS", shared_storage, mission_id)
                 last_log_offset = len(full_log)
 

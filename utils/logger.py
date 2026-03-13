@@ -1,11 +1,11 @@
 import time
 import sys
-from utils.database import load_mission, save_mission
+from utils.database import save_mission
 
 def log(message, level="INFO", shared_storage=None, mission_id=None):
     """
-    Logger haute performance LuxSoft avec persistance SQLite.
-    Garantit que les logs survivent aux redémarrages de l'instance Render.
+    Logger LuxSoft optimisé.
+    Réduit les accès disque en utilisant le cache RAM (shared_storage) avant la persistance.
     """
     prefixes = {
         "INFO": "🤖 [AXIOMOS]",
@@ -20,33 +20,31 @@ def log(message, level="INFO", shared_storage=None, mission_id=None):
     timestamp = time.strftime("%H:%M:%S")
     formatted_msg = f"[{timestamp}] {prefix} {message}"
     
-    # 1. Sortie Standard (Dashboard Render)
+    # 1. Sortie Standard (Toujours prioritaire pour le debug Render)
     print(formatted_msg)
     sys.stdout.flush()
     
-    # 2. Persistance SQLite (Pour le Frontend)
-    if mission_id:
+    # 2. Persistance (Gestion intelligente)
+    if mission_id and shared_storage is not None:
         try:
-            # On récupère l'état actuel depuis la DB (plus fiable que la RAM en cas de crash)
-            mission_data = load_mission(mission_id)
+            # On travaille directement en RAM pour la rapidité
+            if mission_id not in shared_storage:
+                shared_storage[mission_id] = {"live_logs": [], "status": "initializing"}
             
-            if mission_data:
-                if "live_logs" not in mission_data:
-                    mission_data["live_logs"] = []
-                
-                # Ajout du log
-                mission_data["live_logs"].append({
-                    "timestamp": timestamp,
-                    "level": level_upper,
-                    "message": str(message)
-                })
-                
-                # SAUVEGARDE IMMEDIATE SUR DISQUE
-                save_mission(mission_id, mission_data)
-                
-                # Mise à jour optionnelle de la RAM si présente
-                if shared_storage is not None and mission_id in shared_storage:
-                    shared_storage[mission_id] = mission_data
+            if "live_logs" not in shared_storage[mission_id]:
+                shared_storage[mission_id]["live_logs"] = []
+            
+            # Ajout du log en RAM
+            log_entry = {
+                "timestamp": timestamp,
+                "level": level_upper,
+                "message": str(message)
+            }
+            shared_storage[mission_id]["live_logs"].append(log_entry)
+            
+            # SAUVEGARDE SUR DISQUE (On persiste l'état actuel de la RAM)
+            save_mission(mission_id, shared_storage[mission_id])
                     
         except Exception as e:
-            print(f"Internal Telemetry Logging Error: {e}")
+            # On ne print pas formatted_msg ici pour éviter les boucles si l'erreur vient du print
+            print(f"Internal Telemetry Error: {e}")
