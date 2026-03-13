@@ -6,8 +6,8 @@ from utils.logger import log
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Version LUXSOFT - Capture d'état stable.
-    Optimisé pour éviter les erreurs 404 en laissant le temps au serveur de générer l'image.
+    Version LUXSOFT - Direct Uplink Protocol.
+    Injecte le run_id en temps réel pour permettre au frontend de bypasser le proxy Render.
     """
     token = get_apify_token()
     if not token:
@@ -17,37 +17,42 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     client = ApifyClient(token)
     
     try:
-        log(f"Mission {mission_id}: Initiating NATIVE LIVE UPLINK...", "INFO", shared_storage, mission_id)
-        log("Deploying Autonomous Extraction Core...", "ACTION", shared_storage, mission_id)
+        log(f"Mission {mission_id}: Initiating VISUAL FOCUS UPLINK...", "INFO", shared_storage, mission_id)
         
-        # Configuration simplifiée pour la stabilité
+        # LANCEMENT DE L'AGENT
         data_run = client.actor("apify/rag-web-browser").start(
             run_input={
                 "startUrls": [{"url": str(url)}],
                 "query": str(goal),
-                "maxPagesPerCrawl": 1, # Uniquement la page cible pour la rapidité
+                "maxPagesPerCrawl": 1,
                 "proxyConfiguration": {"useApifyProxy": True},
                 "saveScreenshot": True,
-                "dynamicContentWaitSecs": 10,
+                "dynamicContentWaitSecs": 15, # On laisse du temps au rendu
+                "waitUntil": "networkidle",
                 "maxResults": 3
             },
             memory_mbytes=1024
         )
         d_run_id = data_run["id"]
 
-        # PAUSE INITIALE : On laisse 12 secondes pour être sûr que le navigateur soit ouvert
+        # --- ÉTAPE CRUCIALE : On expose l'ID au reste du système immédiatement ---
+        if shared_storage is not None and mission_id in shared_storage:
+            shared_storage[mission_id]["run_id"] = d_run_id
+            log(f"Uplink established. Run ID synchronized: {d_run_id}", "INFO", shared_storage, mission_id)
+
+        # PAUSE INITIALE : Pour laisser le temps à la première image d'exister sur Apify
         time.sleep(12)
 
         last_log_offset = 0
         
         while True:
+            # Récupération de l'état du Run
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
             
-            # MISE À JOUR DU VISUEL - Cache-buster simple
+            # MISE À JOUR DU VISUEL (Pour compatibilité, même si le frontend va bypasser)
             if shared_storage is not None and mission_id in shared_storage:
                 ts = int(time.time())
-                # On utilise l'URL directe qui est la plus stable
                 shared_storage[mission_id]["stream_url"] = f"https://api.apify.com/v2/runs/{d_run_id}/screenshots/last?token={token}&v={ts}"
 
             # MISE À JOUR DES LOGS
@@ -64,8 +69,8 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
             
-            # PAUSE DE BOUCLE : 6 secondes pour laisser l'infrastructure Apify respirer
-            time.sleep(6.0)
+            # On boucle toutes les 5 secondes pour la télémétrie
+            time.sleep(5.0)
 
         if d_status == "SUCCEEDED":
             dataset_id = d_details.get("defaultDatasetId")
