@@ -8,7 +8,7 @@ from utils.database import save_mission
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
     Orchestrateur LuxSoft - Version HACKATHON STABLE (LIVE + AUTO-SYNC).
-    Force l'extraction pendant le scroll pour éviter les datasets vides en fin de page.
+    Garantit le flux d'images ET l'extraction de données via une recherche sémantique souple.
     """
     token = get_apify_token()
     if not token:
@@ -34,47 +34,55 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     try {
                         await page.evaluate(() => {
                             const btn = Array.from(document.querySelectorAll('button'))
-                                .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter'));
+                                .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter') || b.innerText.includes('Accept'));
                             if (btn) btn.click();
                         });
                     } catch (e) { log.info('Cookies already handled.'); }
 
                     // --- 2. BOUCLE LIVE + EXTRACTION CONTINUE ---
-                    // On réduit à 12 étapes pour optimiser le temps (environ 1m15 de run)
                     for (let i = 0; i < 12; i++) {
-                        // A. Capture visuelle pour le Dashboard
+                        // A. Capture visuelle pour le Dashboard (TON IMAGE)
                         const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        // B. EXTRACTION IMMÉDIATE de ce qui est visible à l'écran
+                        // B. EXTRACTION SOUPLE (LE FILET DE PÊCHE)
+                        // On ne cherche plus de classes CSS précises, on cherche du texte avec "CHF"
                         const visibleItems = await page.evaluate(() => {
-                            const cards = document.querySelectorAll('.article-item, [data-testid="search-result-cell"]');
-                            return Array.from(cards).map(el => {
-                                const titleEl = el.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
-                                const priceEl = el.querySelector('strong, .article-price, .price, .text-bold');
-                                const linkEl = el.closest('a') || el.querySelector('a');
-                                
-                                if (!titleEl || !priceEl) return null;
-                                const rawPrice = priceEl.innerText.replace(/[^0-9]/g, '');
+                            const elements = document.querySelectorAll('div, article, section, li');
+                            const items = [];
 
-                                return {
-                                    "title": titleEl.innerText.trim(),
-                                    "price": parseInt(rawPrice) || 0,
-                                    "url": linkEl?.href || window.location.href,
-                                    "brand": "Rolex",
-                                    "condition": "Pre-owned"
-                                };
-                            }).filter(item => item !== null && item.price > 1000);
+                            elements.forEach(el => {
+                                const text = el.innerText || "";
+                                // On cible les blocs qui ont l'air d'être des annonces (taille moyenne)
+                                if (text.includes('CHF') && text.length < 600 && text.length > 40) {
+                                    // Extraction du prix par Regex
+                                    const priceMatch = text.match(/(\d[\d\s',.]*)\s?CHF/i);
+                                    if (priceMatch) {
+                                        const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
+                                        if (cleanPrice > 500) {
+                                            items.push({
+                                                "title": text.split('\\n')[0].substring(0, 60),
+                                                "price": cleanPrice,
+                                                "url": el.querySelector('a')?.href || window.location.href,
+                                                "brand": "Rolex",
+                                                "condition": "Pre-owned"
+                                            });
+                                        }
+                                    }
+                                }
+                            });
+                            // Dédoublonnage rapide
+                            return items.filter((v,i,a)=>a.findIndex(t=>(t.price===v.price && t.title===v.title))===i);
                         });
 
-                        // On pousse les données au fur et à mesure (évite le dataset vide à la fin)
+                        // Envoi immédiat vers le Dataset
                         if (visibleItems.length > 0) {
                             await context.pushData(visibleItems);
                         }
 
-                        // C. Scroll pour la suite
-                        await page.evaluate(() => window.scrollBy(0, 500));
-                        await new Promise(r => setTimeout(r, 1200));
+                        // C. Scroll fluide
+                        await page.evaluate(() => window.scrollBy(0, 600));
+                        await new Promise(r => setTimeout(r, 1500));
                     }
                     
                     log.info('Mission de navigation et synchronisation terminée.');
@@ -111,7 +119,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 new_logs = full_log[last_log_offset:]
                 if new_logs.strip():
                     for line in new_logs.strip().split('\n'):
-                        if any(x in line.lower() for x in ["terminée", "extraction", "dataset", "montres"]):
+                        if any(x in line.lower() for x in ["terminée", "extraction", "dataset", "montres", "sync"]):
                             log(f"[AGENT] {line.strip()}", "SUCCESS", shared_storage, mission_id)
                 last_log_offset = len(full_log)
 
