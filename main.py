@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 # Internal LuxSoft service imports
 from agent.apify_client import launch_apify_automation
-from services.smart_analyzer import generate_arbitrage_report # Nouveau service "Cerveau"
+from services.smart_analyzer import generate_arbitrage_report
 from config.secrets import AXIOMOS_INTERNAL_AUTH, get_apify_token
 from utils.database import init_db, save_mission, load_mission
 from utils.logger import log
@@ -53,16 +53,13 @@ def read_root():
     return {
         "status": "online", 
         "service": "LuxSoft Engine", 
-        "version": "4.0.0_HYBRID_CORE",
+        "version": "4.1.0_HYBRID_STABLE",
         "database": db_status,
         "persisted_missions": mission_count
     }
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
-    """
-    PROXY SYNCHRONE : Affiche le flux Puppeteer en direct.
-    """
     mission = load_mission(mission_id)
     if not mission:
         return Response(status_code=404)
@@ -81,23 +78,18 @@ async def proxy_live_image(mission_id: str):
     return RedirectResponse(url=idle_url)
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """
-    Pipeline d'orchestration Hybride :
-    1. L'ŒIL (Puppeteer) : Défilement visuel et capture de texte.
-    2. LE CERVEAU (IA) : Analyse sémantique et rapport d'arbitrage.
-    """
+    """Pipeline d'orchestration Hybride : L'Œil (Visuel) + Le Cerveau (IA)"""
     loop = asyncio.get_event_loop()
     initial_state = load_mission(mission_id)
     shared_ref = {mission_id: initial_state}
 
     try:
         # Phase 1: L'ŒIL (Automation & Acquisition)
-        # On récupère le raw_text directement en retour de l'automation
         raw_text = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # Mise à jour immédiate du stream_url pour le dashboard pendant l'analyse
+        # Sauvegarde immédiate du stream_url final pour le dashboard
         updated_in_ram = shared_ref.get(mission_id)
         if updated_in_ram:
             save_mission(mission_id, updated_in_ram)
@@ -108,22 +100,30 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             save_mission(mission_id, current_state)
 
             # Phase 2: LE CERVEAU (Intelligence Artificielle)
-            # Utilise le texte capturé pour générer un rapport précis
             report_content = await loop.run_in_executor(
                 executor, generate_arbitrage_report, raw_text, goal, mission_id, shared_ref
             )
             
-            # Phase 3: Construction du rapport final
+            # Phase 3: Construction du rapport final (BACKUP MULTI-CLÉS)
             final_state = load_mission(mission_id)
-            final_state["report"] = {
+            
+            # Remplissage de toutes les clés possibles pour compatibilité Frontend
+            report_payload = {
                 "title": f"Axiomos Intelligence Report - {mission_id}",
                 "content": report_content,
+                "summary": report_content,
+                "text": report_content,
+                "description": report_content,
                 "timestamp": time.strftime("%H:%M:%S")
             }
+            
+            final_state["report"] = report_payload
             final_state["status"] = "completed"
             save_mission(mission_id, final_state)
             
-            print(f"--- SUCCESS: Mission {mission_id} completed via Hybrid Engine ---")
+            # Log de vérification pour la console Render
+            print(f"--- [DEBUG] MISSION {mission_id} COMPLETED. REPORT SIZE: {len(report_content)} bytes ---")
+            
         else:
             final_state = load_mission(mission_id)
             final_state["status"] = "failed"
@@ -152,7 +152,7 @@ async def start_mission(
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Hybrid Uplink secured. Deploying Eye & Brain units."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Hybrid Engine Online. Deploying Eye & Brain units."}],
         "report": None
     }
     save_mission(mission_id, initial_data)
