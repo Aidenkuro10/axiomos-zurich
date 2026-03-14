@@ -6,14 +6,14 @@ from utils.logger import log
 def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=None, target_url=None):
     """
     LE CERVEAU : Version LUXSOFT ELITE.
-    Restaure l'analyse détaillée et augmente le volume de détection.
+    Correction chirurgicale du formatage du rapport et de la cohérence factuelle.
     """
     log(f"Mission {mission_id}: Analyse stratégique et extraction des opportunités...", "ACTION", shared_storage, mission_id)
     
     client = openai.OpenAI(api_key=get_openai_key())
     backup_url = target_url if target_url else "https://www.chrono24.ch"
     
-    # On remonte à 25k pour voir plus de montres sur la page
+    # Conservation du volume de données stable (25k)
     optimized_text = raw_text[:25000] 
     
     prompt = f"""
@@ -21,8 +21,11 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
     GOAL: {goal}
 
     ANALYSIS RULES:
-    1. SUMMARY: Write a professional, detailed market analysis in ENGLISH. Explain the current price trends for the Submariners found. Be insightful.
-    2. DETECTION: Extract as many valid Rolex Submariner deals as possible. Don't be too restrictive, but prioritize items with prices.
+    1. SUMMARY: Write a professional market analysis in ENGLISH. 
+       STRICT FORMATTING: Use double line breaks (\\n\\n) to create distinct blocks. 
+       Start with a market overview, followed by specific insights on the deals found below.
+    2. COHERENCE: Ensure the prices mentioned in your summary match the data of the extracted deals.
+    3. DETECTION: Extract as many valid Rolex Submariner deals as possible. Don't be too restrictive, but prioritize items with prices.
 
     URL HIERARCHY:
     1. Priority 1 (Direct): 8-9 digit Ad ID -> https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
@@ -36,7 +39,7 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
 
     JSON STRUCTURE:
     {{
-      "summary": "Your detailed professional analysis here...",
+      "summary": "First block here.\\n\\nSecond block about deals...\\n\\nFinal advice.",
       "deals": [
         {{
           "brand": "Rolex",
@@ -56,11 +59,11 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
         response = client.chat.completions.create(
             model="gpt-4o", 
             messages=[
-                {"role": "system", "content": "You are a world-class watch market expert. Deliver a detailed analysis and extract every single viable deal in JSON."},
+                {"role": "system", "content": "You are a world-class watch market expert. Deliver a structured analysis with clear line breaks (double \\n) and extract every single viable deal in JSON."},
                 {"role": "user", "content": prompt}
             ],
             response_format={ "type": "json_object" },
-            temperature=0.3 # On remonte un peu la température pour plus de "choix" et de rédaction
+            temperature=0.3
         )
         
         return response.choices[0].message.content
