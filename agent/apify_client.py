@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version BLITZ & SNIPER (Ultra-Light).
-    Optimisé pour les serveurs à RAM limitée afin d'éviter les crashs.
+    Orchestrateur LuxSoft - Version BLITZ & SNIPER.
+    Navigation ultra-rapide et capture des URLs réelles pour supprimer les erreurs 404.
     """
     token = get_apify_token()
     if not token:
@@ -28,15 +28,13 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 "startUrls": [{"url": str(url)}],
                 "pageFunction": """async function pageFunction(context) {
                     const { page, log } = context;
-                    
-                    // --- OPTIMISATION RAM : Viewport réduit ---
-                    await page.setViewport({ width: 1000, height: 800 });
+                    await page.setViewport({ width: 1280, height: 1000 });
                     
                     // --- A. CAPTURE IMMÉDIATE (ANTI-ÉCRAN NOIR) ---
-                    const firstShot = await page.screenshot({ quality: 30 });
+                    const firstShot = await page.screenshot();
                     await context.setValue('VUE_DIRECTE', firstShot, { contentType: 'image/png' });
 
-                    // --- B. CONTOURNEMENT COOKIES ---
+                    // --- B. CONTOURNEMENT COOKIES (NETTOYAGE RADICAL) ---
                     try {
                         await page.evaluate(() => {
                             const btn = document.querySelector('#consent_prompt_submit') || 
@@ -45,38 +43,37 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                             if (btn) btn.click();
                         });
                         await new Promise(r => setTimeout(r, 1500));
-                        log.info('Cookies cleared.');
-                    } catch (e) { log.info('Bypass unnecessary.'); }
+                        log.info('Cookies cleared, field of view open.');
+                    } catch (e) { log.info('Cookies bypass failed or unnecessary.'); }
 
-                    // --- C. BOUCLE D'EXTRACTION BLITZ & SNIPER (6 CYCLES) ---
+                    // --- C. BOUCLE D'EXTRACTION BLITZ & SNIPER (VITESSE + URLs) ---
                     let accumulatedData = "";
                     for (let i = 0; i < 6; i++) {
-                        // Qualité 30% pour économiser la RAM de l'instance Render
-                        const screenshot = await page.screenshot({ quality: 30 });
+                        // Capture visuelle optimisée (Blitz)
+                        const screenshot = await page.screenshot({ quality: 50 });
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        // Capture des URLs (Sniper)
+                        // Extraction Sniper : On force la capture de l'URL pour éviter le 404
                         const cardsData = await page.evaluate(() => {
                             const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card');
                             return Array.from(cards).map(card => {
                                 const link = card.querySelector('a')?.href || "No URL";
-                                const cleanText = card.innerText.replace(/\\n/g, ' ').replace(/\\s+/g, ' ');
-                                return `[SOURCE_URL: ${link}] Data: ${cleanText}`;
+                                return `[SOURCE_URL: ${link}] Data: ${card.innerText.replace(/\\n/g, ' ')}`;
                             }).join('\\n---\\n');
                         });
                         
                         accumulatedData += cardsData + "\\n";
 
-                        // Scroll Blitz (agressif)
-                        await page.evaluate((step) => { window.scrollTo(0, (step + 1) * 1100); }, i);
+                        // Scroll Blitz (plus rapide)
+                        await page.evaluate((step) => { window.scrollTo(0, step * 1200); }, i + 1);
                         await new Promise(r => setTimeout(r, 800)); 
                     }
                     
-                    // --- D. MOISSON FINALE ---
+                    // --- D. MOISSON FINALE (RAW TEXT) POUR LE SMART ANALYZER ---
                     const fullPageText = await page.evaluate(() => document.body.innerText);
                     await context.setValue('RAW_TEXT', accumulatedData + "\\n\\nFULL_BODY_TEXT:\\n" + fullPageText);
                     
-                    log.info('Mission Blitz terminée.');
+                    log.info('Mission de navigation Blitz terminée.');
                 }""",
                 "proxyConfiguration": {
                     "useApifyProxy": True,
@@ -105,9 +102,9 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             d_status = d_details.get("status")
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
-            time.sleep(1)
+            time.sleep(1) # Check toutes les secondes pour gagner en réactivité
 
-        # Renvoie la moisson (Texte + URLs) au Cerveau
+        # Renvoie le texte brut enrichi des URLs pour le Cerveau (main.py)
         raw_text_data = client.key_value_store(d_store_id).get_record("RAW_TEXT")
         return raw_text_data["value"] if raw_text_data else None
             
