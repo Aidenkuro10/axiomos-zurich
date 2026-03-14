@@ -5,37 +5,39 @@ from utils.logger import log
 
 def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=None, target_url=None):
     """
-    LE CERVEAU : Version Hybride (Vitesse + Précision URL).
-    Fusionne la rapidité du traitement avec la construction d'URL par référence.
+    LE CERVEAU : Version Sniper Master-Ref.
+    Incorpore un dictionnaire de traduction pour les surnoms (Hulk, Kermit, etc.).
     """
-    log(f"Mission {mission_id}: Analyse hybride (Vitesse & Précision)...", "ACTION", shared_storage, mission_id)
+    log(f"Mission {mission_id}: Traduction des modèles et sniping de références...", "ACTION", shared_storage, mission_id)
     
     client = openai.OpenAI(api_key=get_openai_key())
     backup_url = target_url if target_url else "https://www.chrono24.ch"
     
-    # On utilise 20k caractères : compromis idéal pour choper les refs sans crash mémoire.
     optimized_text = raw_text[:20000] 
     
     prompt = f"""
     Identify Rolex Submariner deals. Output JSON ONLY.
     Language: ENGLISH.
 
-    URL HIERARCHY (CRITICAL):
-    1. PRIORITY 1 (Direct ID): If you find a 7-9 digit numerical ID, use:
-       https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
-    2. PRIORITY 2 (Reference): If no ID but you have a reference (e.g. 16800, 116610), use:
-       https://www.chrono24.ch/rolex/ref-[REFERENCE].htm
-    3. FALLBACK: Otherwise, use: {backup_url}
+    URL HIERARCHY & TRANSLATION RULES:
+    1. PRIORITY 1 (Direct ID): 8-9 digit number -> https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
+    2. PRIORITY 2 (Smart Ref Construction): If you see these names, use the associated REF number:
+       - 'Hulk' -> 116610LV
+       - 'Kermit' -> 16610LV
+       - 'Starbucks' -> 126610LV
+       - 'Smurf' -> 116619LB
+    3. URL FORMAT for Refs: https://www.chrono24.ch/rolex/ref-[REFERENCE].htm
+    4. FALLBACK: If no ID or specific Ref is found, use: {backup_url}
 
     JSON STRUCTURE:
     {{
-      "summary": "English market analysis.",
+      "summary": "English analysis.",
       "deals": [
         {{
           "brand": "Rolex",
-          "model_name": "Full Model Name (with Ref if possible)",
+          "model_name": "Full Model Name (e.g. Submariner Hulk 116610LV)",
           "listed_price": 0,
-          "source_url": "The best URL based on hierarchy above",
+          "source_url": "The constructed URL based on Ref or ID",
           "high_value_signal": true
         }}
       ]
@@ -49,7 +51,7 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
         response = client.chat.completions.create(
             model="gpt-4o", 
             messages=[
-                {"role": "system", "content": "You are a precision data extractor. Use URL hierarchy to ensure valid links."},
+                {"role": "system", "content": "You are a master watch expert. You translate nicknames like Hulk/Kermit into official references for URL building."},
                 {"role": "user", "content": prompt}
             ],
             response_format={ "type": "json_object" },
