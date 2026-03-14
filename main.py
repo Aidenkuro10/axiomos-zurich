@@ -3,6 +3,7 @@ import time
 import asyncio
 import os
 import requests
+import json
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
@@ -75,30 +76,36 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             save_mission(mission_id, current_state)
 
             # Phase 2: LE CERVEAU (IA)
+            # Cette fonction renvoie maintenant une chaîne JSON
             report_content = await loop.run_in_executor(
                 executor, generate_arbitrage_report, raw_text, goal, mission_id, shared_ref
             )
             
-            # Phase 3: FORMATAGE POUR L'INTERFACE (CRITIQUE)
-            # Ton HTML cherche 'summary' et boucle sur 'opportunities_found'
+            # Phase 3: FORMATAGE POUR L'INTERFACE (INTÉGRATION DYNAMIQUE)
             final_state = load_mission(mission_id)
             
-            final_state["report"] = {
-                "summary": report_content,
-                "opportunities_found": [
-                    {
-                        "brand": "Rolex",
-                        "model_name": "Submariner Target",
-                        "listed_price": 12500, # Valeur factice pour activer la carte
-                        "source_url": url,
-                        "high_value_signal": True
-                    }
-                ]
-            }
+            try:
+                # On tente de parser le JSON renvoyé par l'IA
+                ai_data = json.loads(report_content)
+                
+                final_state["report"] = {
+                    "summary": ai_data.get("summary", "Analysis complete."),
+                    "opportunities_found": ai_data.get("deals", [])
+                }
+            except Exception as json_err:
+                # Fallback de sécurité si l'IA renvoie du texte brut
+                print(f"DEBUG: JSON Parse fail, using raw text fallback: {json_err}")
+                final_state["report"] = {
+                    "summary": report_content,
+                    "opportunities_found": [] # On ne met rien dans la grille pour éviter les crashs JS
+                }
             
             final_state["status"] = "completed"
             save_mission(mission_id, final_state)
-            print(f"--- [SYNC SUCCESS] MISSION {mission_id} | SIZE: {len(report_content)} bytes ---")
+            
+            # On log le nombre de deals réels trouvés
+            deals_count = len(final_state["report"].get("opportunities_found", []))
+            print(f"--- [SYNC SUCCESS] MISSION {mission_id} | DEALS FOUND: {deals_count} ---")
             
         else:
             final_state = load_mission(mission_id)
