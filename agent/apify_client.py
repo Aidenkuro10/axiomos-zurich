@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version BLITZ STABLE.
-    Vitesse accrue et protection de la VUE_DIRECTE.
+    Orchestrateur LuxSoft - Version SNIPER ELITE HYBRIDE.
+    Explosion des popups, flux live et moisson de texte brut pour l'IA.
     """
     token = get_apify_token()
     if not token:
@@ -33,10 +33,10 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     const sentItems = new Set();
 
                     // --- A. CAPTURE IMMÉDIATE (ANTI-ÉCRAN NOIR) ---
-                    const firstShot = await page.screenshot({ quality: 50 });
+                    const firstShot = await page.screenshot();
                     await context.setValue('VUE_DIRECTE', firstShot, { contentType: 'image/png' });
 
-                    // --- B. CONTOURNEMENT COOKIES ---
+                    // --- B. CONTOURNEMENT COOKIES (NETTOYAGE RADICAL) ---
                     try {
                         await page.evaluate(() => {
                             const btn = document.querySelector('#consent_prompt_submit') || 
@@ -44,35 +44,46 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                                         .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter') || b.innerText.includes('Accept'));
                             if (btn) btn.click();
                         });
-                        await new Promise(r => setTimeout(r, 1000));
-                    } catch (e) { log.info('Cookies bypass skipped.'); }
+                        await new Promise(r => setTimeout(r, 2000));
+                        log.info('Cookies cleared, field of view open.');
+                    } catch (e) { log.info('Cookies already handled or bypass failed.'); }
 
-                    // --- C. BOUCLE BLITZ (RÉDUITE À 5 POUR LA VITESSE) ---
-                    for (let i = 0; i < 5; i++) {
-                        // Capture visuelle conservée pour ton dashboard
-                        const screenshot = await page.screenshot({ quality: 40 });
+                    // --- C. ATTENTE DU CONTENU ---
+                    try {
+                        await page.waitForSelector('.article-item, [data-testid="article-card"]', { timeout: 10000 });
+                    } catch (e) { log.info('Selector timeout, proceeding with raw scan.'); }
+
+                    // --- D. BOUCLE D'EXTRACTION ET SCROLL ---
+                    for (let i = 0; i < 12; i++) {
+                        // Capture visuelle pour le dashboard
+                        const screenshot = await page.screenshot();
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
                         const visibleItems = await page.evaluate((alreadySent) => {
-                            const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card');
+                            const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card, div[class*="item"]');
                             const foundNow = [];
 
                             cards.forEach(card => {
                                 const text = card.innerText || "";
-                                const titleEl = card.querySelector('h1, h2, h3, .article-title');
-                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?(CHF|€|\\$)/i);
+                                const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
+                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?(CHF|€|\\$|EUR|USD)/i);
 
                                 if (priceMatch) {
-                                    const title = titleEl ? titleEl.innerText.trim() : "Rolex Submariner";
+                                    const title = titleEl ? titleEl.innerText.trim() : text.split('\\n')[0].substring(0, 40).trim();
                                     const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
-                                    const itemID = `${title.substring(0,15)}-${cleanPrice}`;
+                                    const itemID = `${title.substring(0,20)}-${cleanPrice}`;
 
-                                    if (title.toLowerCase().includes('submariner') && !alreadySent.includes(itemID)) {
+                                    const isSub = title.toLowerCase().includes('submariner');
+                                    const isDuplicate = alreadySent.includes(itemID);
+
+                                    if (isSub && !isDuplicate && cleanPrice > 4000 && cleanPrice < 60000) {
                                         foundNow.push({
                                             "id": itemID,
                                             "title": title,
                                             "price": cleanPrice,
-                                            "url": card.querySelector('a')?.href || window.location.href
+                                            "url": card.querySelector('a')?.href || window.location.href,
+                                            "brand": "Rolex",
+                                            "condition": "Pre-owned"
                                         });
                                     }
                                 }
@@ -85,16 +96,16 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                             await context.pushData(visibleItems);
                         }
 
-                        // Scroll plus large pour aller plus vite
-                        await page.evaluate((step) => { window.scrollTo(0, step * 1500); }, i + 1);
-                        await new Promise(r => setTimeout(r, 600)); 
+                        // Scroll forcé pour découvrir de nouvelles zones
+                        await page.evaluate((step) => { window.scrollTo(0, step * 800); }, i + 1);
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                     
-                    // --- D. MOISSON FINALE ---
+                    // --- E. MOISSON FINALE (RAW TEXT) POUR LE SMART ANALYZER ---
                     const fullText = await page.evaluate(() => document.body.innerText);
                     await context.setValue('RAW_TEXT', fullText);
                     
-                    log.info('Blitz Scan complete.');
+                    log.info('Mission de navigation et synchronisation terminée.');
                 }""",
                 "proxyConfiguration": {
                     "useApifyProxy": True,
@@ -109,22 +120,23 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         d_run_id = data_run["id"]
         d_store_id = data_run["defaultKeyValueStoreId"]
 
-        # 2. INJECTION FLUX VISUEL
+        # 2. INJECTION DE L'URL DE NOTRE FLUX VISUEL
         native_live_url = f"https://api.apify.com/v2/key-value-stores/{d_store_id}/records/VUE_DIRECTE?token={token}"
         
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = native_live_url
             save_mission(mission_id, shared_storage[mission_id])
-            log(f"🚀 UPLINK SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
+            log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # 3. MONITORING RÉACTIF
+        # 3. MONITORING DU STATUT
         while True:
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
-            time.sleep(1) # Monitoring plus rapide (1s au lieu de 2s)
+            time.sleep(2)
 
+        # Renvoie le texte brut pour le Cerveau (main.py)
         raw_text_data = client.key_value_store(d_store_id).get_record("RAW_TEXT")
         return raw_text_data["value"] if raw_text_data else None
             
