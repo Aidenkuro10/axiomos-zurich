@@ -5,24 +5,29 @@ from utils.logger import log
 
 def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=None, target_url=None):
     """
-    LE CERVEAU : Version LUXSOFT ELITE.
-    Restaure l'analyse détaillée et augmente le volume de détection.
+    LE CERVEAU : Version LUXSOFT ELITE HYBRIDE.
+    Analyse structurée, détection factuelle et sniping d'URLs.
     """
     log(f"Mission {mission_id}: Analyse stratégique et extraction des opportunités...", "ACTION", shared_storage, mission_id)
     
     client = openai.OpenAI(api_key=get_openai_key())
     backup_url = target_url if target_url else "https://www.chrono24.ch"
     
-    # On remonte à 25k pour voir plus de montres sur la page
+    # Context optimisé pour la détection sans sacrifier la vitesse
     optimized_text = raw_text[:25000] 
     
     prompt = f"""
     You are the Senior Market Analyst for Axiomos. 
     GOAL: {goal}
 
-    ANALYSIS RULES:
-    1. SUMMARY: Write a professional, detailed market analysis in ENGLISH. Explain the current price trends for the Submariners found. Be insightful.
-    2. DETECTION: Extract as many valid Rolex Submariner deals as possible. Don't be too restrictive, but prioritize items with prices.
+    STRICT ANALYSIS RULES:
+    1. SUMMARY STRUCTURE: You MUST use these 3 sections with brackets. Do not write a single block.
+       [MARKET TREND]: One insightful sentence about the current price direction.
+       [LIQUIDITY ALERT]: Use bullet points (•) to list 2 distinct factual findings.
+       [STRATEGIC ADVICE]: One final professional recommendation.
+    2. FACTUAL CHECK: Do not hallucinate prices. Only mention prices or averages found in the provided DATA.
+    3. DETECTION: Extract as many valid Rolex Submariner deals as possible.
+    4. SIGNAL: Set "high_value_signal" to true ONLY for the top 2 best deals (the biggest price gaps).
 
     URL HIERARCHY:
     1. Priority 1 (Direct): 8-9 digit Ad ID -> https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
@@ -36,19 +41,19 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
 
     JSON STRUCTURE:
     {{
-      "summary": "Your detailed professional analysis here...",
+      "summary": "[MARKET TREND]...\\n\\n[LIQUIDITY ALERT]\\n• Point 1\\n• Point 2\\n\\n[STRATEGIC ADVICE]...",
       "deals": [
         {{
           "brand": "Rolex",
-          "model_name": "Exact Model & Ref",
+          "model_name": "Model & Ref",
           "listed_price": 0,
           "source_url": "Constructed URL",
-          "high_value_signal": true
+          "high_value_signal": false
         }}
       ]
     }}
 
-    DATA:
+    DATA TO ANALYZE:
     {optimized_text}
     """
 
@@ -56,15 +61,18 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
         response = client.chat.completions.create(
             model="gpt-4o", 
             messages=[
-                {"role": "system", "content": "You are a world-class watch market expert. Deliver a detailed analysis and extract every single viable deal in JSON."},
+                {"role": "system", "content": "You are a world-class watch market expert. You respond in JSON. You structure your summary with [SECTION NAMES] and bullet points for maximum clarity."},
                 {"role": "user", "content": prompt}
             ],
             response_format={ "type": "json_object" },
-            temperature=0.3 # On remonte un peu la température pour plus de "choix" et de rédaction
+            temperature=0.3
         )
         
         return response.choices[0].message.content
         
     except Exception as e:
         log(f"💥 Brain Error: {str(e)}", "ERROR", shared_storage, mission_id)
-        return json.dumps({"summary": "Analysis interrupted.", "deals": []})
+        return json.dumps({
+            "summary": "[ERROR] Analysis interrupted. System fallback engaged.", 
+            "deals": []
+        })
