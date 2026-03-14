@@ -6,7 +6,7 @@ from utils.logger import log
 def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=None, target_url=None):
     """
     LE CERVEAU : Version Stable & Safe.
-    Objectif : Réparer les liens sans toucher à la vitesse du scan.
+    Objectif : Réparer les liens (watchId) sans toucher à la vitesse du scan.
     """
     log(f"Mission {mission_id}: Le Cerveau analyse les données de marché...", "ACTION", shared_storage, mission_id)
     
@@ -22,9 +22,10 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
 
     STRICT URL RULES:
     1. Chrono24 ads always have a numerical ID in the text.
-    2. Format the source_url EXACTLY as a search query for that ID: 
-       https://www.chrono24.ch/search/index.htm?watchTypes=U&query=rolex+[ID]
-    3. Use the mission's target_url as fallback: {backup_url}
+    2. Format the source_url EXACTLY like this: 
+       https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
+    3. Replace [ID] with the numerical ID found. This direct ID link prevents search form errors.
+    4. Use the mission's target_url as fallback: {backup_url}
     
     JSON STRUCTURE:
     {{
@@ -34,7 +35,7 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
           "brand": "Rolex",
           "model_name": "Model + Reference",
           "listed_price": 0,
-          "source_url": "https://www.chrono24.ch/search/index.htm?watchTypes=U&query=rolex+[ID]",
+          "source_url": "https://www.chrono24.ch/rolex/index.htm?watchId=[ID]",
           "high_value_signal": true
         }}
       ]
