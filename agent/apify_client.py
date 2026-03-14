@@ -7,8 +7,9 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version SNIPER ELITE HYBRIDE.
-    Explosion des popups, flux live et moisson de texte brut pour l'IA.
+    Orchestrateur LuxSoft - Version ABSOLUTE SNIPER.
+    Extraction chirurgicale liant chaque annonce à son URL exacte.
+    Optimisé pour la stabilité RAM sur Render.
     """
     token = get_apify_token()
     if not token:
@@ -28,15 +29,15 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 "startUrls": [{"url": str(url)}],
                 "pageFunction": """async function pageFunction(context) {
                     const { page, log } = context;
-                    await page.setViewport({ width: 1280, height: 1000 });
                     
-                    const sentItems = new Set();
-
-                    // --- A. CAPTURE IMMÉDIATE (ANTI-ÉCRAN NOIR) ---
-                    const firstShot = await page.screenshot();
+                    // Optimisation RAM pour éviter le "Shutting down" de Render
+                    await page.setViewport({ width: 1000, height: 800 });
+                    
+                    // --- A. CAPTURE IMMÉDIATE ---
+                    const firstShot = await page.screenshot({ quality: 30 });
                     await context.setValue('VUE_DIRECTE', firstShot, { contentType: 'image/png' });
 
-                    // --- B. CONTOURNEMENT COOKIES (NETTOYAGE RADICAL) ---
+                    // --- B. CONTOURNEMENT COOKIES ---
                     try {
                         await page.evaluate(() => {
                             const btn = document.querySelector('#consent_prompt_submit') || 
@@ -44,68 +45,48 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                                         .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter') || b.innerText.includes('Accept'));
                             if (btn) btn.click();
                         });
-                        await new Promise(r => setTimeout(r, 2000));
-                        log.info('Cookies cleared, field of view open.');
-                    } catch (e) { log.info('Cookies already handled or bypass failed.'); }
+                        await new Promise(r => setTimeout(r, 1500));
+                    } catch (e) { log.info('Cookies bypass skipped.'); }
 
-                    // --- C. ATTENTE DU CONTENU ---
-                    try {
-                        await page.waitForSelector('.article-item, [data-testid="article-card"]', { timeout: 10000 });
-                    } catch (e) { log.info('Selector timeout, proceeding with raw scan.'); }
-
-                    // --- D. BOUCLE D'EXTRACTION ET SCROLL ---
-                    for (let i = 0; i < 12; i++) {
+                    // --- C. BOUCLE D'EXTRACTION ABSOLUTE SNIPER (6 CYCLES) ---
+                    let accumulatedSniperData = "";
+                    
+                    for (let i = 0; i < 6; i++) {
                         // Capture visuelle pour le dashboard
-                        const screenshot = await page.screenshot();
+                        const screenshot = await page.screenshot({ quality: 30 });
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        const visibleItems = await page.evaluate((alreadySent) => {
-                            const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card, div[class*="item"]');
-                            const foundNow = [];
-
-                            cards.forEach(card => {
-                                const text = card.innerText || "";
-                                const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
-                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?(CHF|€|\\$|EUR|USD)/i);
-
-                                if (priceMatch) {
-                                    const title = titleEl ? titleEl.innerText.trim() : text.split('\\n')[0].substring(0, 40).trim();
-                                    const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
-                                    const itemID = `${title.substring(0,20)}-${cleanPrice}`;
-
-                                    const isSub = title.toLowerCase().includes('submariner');
-                                    const isDuplicate = alreadySent.includes(itemID);
-
-                                    if (isSub && !isDuplicate && cleanPrice > 4000 && cleanPrice < 60000) {
-                                        foundNow.push({
-                                            "id": itemID,
-                                            "title": title,
-                                            "price": cleanPrice,
-                                            "url": card.querySelector('a')?.href || window.location.href,
-                                            "brand": "Rolex",
-                                            "condition": "Pre-owned"
-                                        });
-                                    }
+                        // Extraction Absolute Sniper : On cible les liens réels d'annonces
+                        const extractedPageData = await page.evaluate(() => {
+                            // On cible tous les liens pointant vers une fiche Rolex
+                            const links = Array.from(document.querySelectorAll('a[href*="/rolex/"]'));
+                            
+                            return links.map(link => {
+                                const href = link.href;
+                                // On récupère le texte du lien et du conteneur immédiat
+                                const titleText = link.innerText.replace(/\\n/g, ' ').trim();
+                                const containerText = link.parentElement ? link.parentElement.innerText.replace(/\\n/g, ' ').substring(0, 300) : "";
+                                
+                                // On ne valide que si c'est une annonce (contient un prix ou une devise)
+                                if (containerText.includes('CHF') || containerText.includes('€') || containerText.match(/\\d/)) {
+                                    return `IDENTIFIED_WATCH: ${titleText} | DIRECT_LINK: ${href} | CONTEXT: ${containerText}`;
                                 }
-                            });
-                            return foundNow;
-                        }, Array.from(sentItems));
+                                return null;
+                            }).filter(item => item !== null).join('\\n---\\n');
+                        });
+                        
+                        accumulatedSniperData += extractedPageData + "\\n";
 
-                        if (visibleItems.length > 0) {
-                            visibleItems.forEach(item => sentItems.add(item.id));
-                            await context.pushData(visibleItems);
-                        }
-
-                        // Scroll forcé pour découvrir de nouvelles zones
-                        await page.evaluate((step) => { window.scrollTo(0, step * 800); }, i + 1);
-                        await new Promise(r => setTimeout(r, 2000));
+                        // Scroll Blitz (agressif)
+                        await page.evaluate((step) => { window.scrollTo(0, (step + 1) * 1100); }, i);
+                        await new Promise(r => setTimeout(r, 800)); 
                     }
                     
-                    // --- E. MOISSON FINALE (RAW TEXT) POUR LE SMART ANALYZER ---
+                    // --- D. SAUVEGARDE POUR LE SMART ANALYZER ---
                     const fullText = await page.evaluate(() => document.body.innerText);
-                    await context.setValue('RAW_TEXT', fullText);
+                    await context.setValue('RAW_TEXT', accumulatedSniperData + "\\n\\nFULL_BODY_DUMP:\\n" + fullText);
                     
-                    log.info('Mission de navigation et synchronisation terminée.');
+                    log.info('Mission Absolute Sniper terminée.');
                 }""",
                 "proxyConfiguration": {
                     "useApifyProxy": True,
@@ -128,15 +109,15 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             save_mission(mission_id, shared_storage[mission_id])
             log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # 3. MONITORING DU STATUT
+        # 3. MONITORING DU STATUT (RÉACTIF 1S)
         while True:
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
-            time.sleep(2)
+            time.sleep(1)
 
-        # Renvoie le texte brut pour le Cerveau (main.py)
+        # Renvoie le texte structuré au Cerveau (main.py)
         raw_text_data = client.key_value_store(d_store_id).get_record("RAW_TEXT")
         return raw_text_data["value"] if raw_text_data else None
             
