@@ -13,7 +13,7 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
     client = openai.OpenAI(api_key=get_openai_key())
     backup_url = target_url if target_url else "https://www.chrono24.ch"
     
-    # Maintien strict du volume de données
+    
     optimized_text = raw_text[:25000] 
     
     prompt = f"""

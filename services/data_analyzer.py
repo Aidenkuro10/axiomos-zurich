@@ -28,7 +28,7 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
         log(f"🔍 Analyzing unique Submariners: {dataset_id}", "INFO", shared_storage, mission_id)
         
         raw_items = []
-        # Système de retry pour laisser le temps au cloud de synchroniser les data
+        
         for attempt in range(4):
             response = requests.get(dataset_url)
             if response.status_code == 200:
@@ -41,15 +41,14 @@ def analyze_market_deals(dataset_id, threshold=0.10, shared_storage=None, missio
             log("📭 Dataset empty or not synchronized.", "WARNING", shared_storage, mission_id)
             return []
 
-        # 1. Nettoyage et filtrage des prix (Plage Submariner : 5k - 50k CHF)
+        
         cleaned_data = []
         for item in raw_items:
             price = item.get('price')
             if isinstance(price, str):
                 price = float(re.sub(r"[^0-9.]", "", price))
             
-            # FILTRE CRITIQUE : On ignore tout ce qui est hors de la fourchette Submariner réaliste.
-            # Cela protège la moyenne contre les textes marketing (91k) ou les accessoires.
+            
             if not price or price < 5000 or price > 50000:
                 continue
 

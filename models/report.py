@@ -21,7 +21,7 @@ def generate_final_report(mission_id: str, deals: List[MarketOpportunity], share
     """
     log(f"📋 Génération du rapport stratégique pour la mission {mission_id}...", "INFO", shared_storage, mission_id)
 
-    # Calcul de l'écart moyen si des opportunités existent
+    
     total_gap = 0.0
     high_value_count = 0
     
@@ -29,18 +29,18 @@ def generate_final_report(mission_id: str, deals: List[MarketOpportunity], share
         if deal.high_value_signal:
             high_value_count += 1
     
-    # Génération d'un résumé intelligent (simulé ici, pourra être enrichi par OpenAI)
+    
     if high_value_count > 0:
         summary_text = f"Analyse terminée. {high_value_count} opportunités d'arbitrage critiques identifiées avec un signal de haute valeur."
     else:
         summary_text = "Scan terminé. Le marché semble stable, aucune anomalie de prix majeure détectée sous le seuil configuré."
 
-    # Création de l'objet de rapport
+    
     report = StrategicReport(
         mission_id=mission_id,
         opportunities_found=deals,
         summary=summary_text,
-        average_market_gap=0.0 # Calcul plus complexe à venir selon la volatilité
+        average_market_gap=0.0 
     )
 
     log(f"✅ Rapport prêt : {len(deals)} items archivés.", "SUCCESS", shared_storage, mission_id)

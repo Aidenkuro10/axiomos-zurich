@@ -4,7 +4,7 @@ from qdrant_client.http import models
 from config.secrets import QDRANT_URL, QDRANT_API_KEY
 from utils.logger import log
 
-# Initialize Qdrant remote cluster connection
+
 client = QdrantClient(
     url=QDRANT_URL, 
     api_key=QDRANT_API_KEY
@@ -39,7 +39,7 @@ def save_opportunity_to_vector_db(opportunity, mission_id):
     Note: A zero-vector placeholder is used until OpenAI embedding logic is integrated.
     """
     try:
-        # Generate a stable 64-bit integer ID from the source URL
+        
         point_id = int(uuid.uuid5(uuid.NAMESPACE_URL, opportunity.source_url).hex[:16], 16)
 
         client.upsert(
@@ -47,7 +47,7 @@ def save_opportunity_to_vector_db(opportunity, mission_id):
             points=[
                 models.PointStruct(
                     id=point_id,
-                    vector=[0.0] * 1536,  # Placeholder for future semantic search
+                    vector=[0.0] * 1536,  
                     payload={
                         "model": opportunity.model_name,
                         "brand": opportunity.brand,

@@ -12,8 +12,7 @@ def get_openai_key() -> str:
     """Retrieves the OpenAI API key for data analysis and reporting."""
     return os.getenv("OPENAI_API_KEY", "")
 
-# --- Qdrant Vector Database Configuration ---
-# Direct export for seamless integration with vector_db.py
+
 QDRANT_URL = os.getenv("QDRANT_URL", "")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 
@@ -40,5 +39,5 @@ def verify_environment():
     else:
         print("✅ [SYSTEM] All environment variables verified. Uplink ready.")
 
-# Run validation on import
+
 verify_environment()

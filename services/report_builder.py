@@ -20,14 +20,14 @@ def generate_final_report(mission_id: str, deals: list, shared_storage=None):
         summary = "Scan complete. No immediate arbitrage opportunities detected with current parameters. " \
                   "Continuous monitoring is recommended."
 
-    # Calculate average market gap for the report
+    
     prices = [d.listed_price for d in deals if d.listed_price > 0]
     avg_gap = 0.0
     if prices:
-        # Calculate percentage spread as a market indicator
+        
         avg_gap = (max(prices) - min(prices)) / max(prices) * 100
 
-    # Build the final Pydantic model for the Frontend
+    
     report = StrategicReport(
         mission_id=mission_id,
         opportunities_found=deals,

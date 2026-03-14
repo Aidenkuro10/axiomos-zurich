@@ -10,10 +10,9 @@ def run_mission_orchestrator(mission_id: str, url: str, goal: str, shared_storag
     Synchronizes state with the global shared_storage for real-time frontend updates.
     """
     try:
-        # 1. Automation Launch (Apify Handshake)
+        
         log(f"Initiating mission {mission_id} on target: {url}", "ACTION", shared_storage, mission_id)
         
-        # Injected shared_storage to allow apify_client to update stream_url immediately
         dataset_id = launch_apify_automation(url, goal, shared_storage, mission_id)
         
         if not dataset_id:
@@ -21,20 +20,16 @@ def run_mission_orchestrator(mission_id: str, url: str, goal: str, shared_storag
             shared_storage[mission_id]["status"] = "failed"
             return
 
-        # 2. Data Retrieval & Analysis
         log("Extraction complete. Analyzing market opportunities...", "INFO", shared_storage, mission_id)
         
-        # Transitioning status for the UI
+        
         shared_storage[mission_id]["status"] = "analyzing"
         
-        # Analyze deals from the extracted dataset
         deals = analyze_market_deals(dataset_id, 0.10, shared_storage, mission_id)
         
-        # 3. Final Strategic Reporting
-        # The report builder compiles findings into a frontend-ready Pydantic model
         report = generate_final_report(mission_id, deals, shared_storage)
         
-        # 4. Final Storage Update for Frontend Polling
+        
         shared_storage[mission_id]["report"] = report.dict()
         shared_storage[mission_id]["status"] = "completed"
         

@@ -4,7 +4,7 @@ import asyncio
 import os
 import requests
 import json
-import gc # Garbage Collector pour stabiliser la RAM sur Render
+import gc 
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
@@ -19,7 +19,7 @@ from config.secrets import AXIOMOS_INTERNAL_AUTH, get_apify_token
 from utils.database import init_db, save_mission, load_mission
 from utils.logger import log
 
-# Initialisation de la base de données au démarrage
+
 init_db()
 
 app = FastAPI(title="LUXSOFT — Mission Control")
@@ -62,15 +62,15 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
     shared_ref = {mission_id: initial_state}
 
     try:
-        # Phase 1: L'ŒIL (Acquisition)
+        
         raw_text = await loop.run_in_executor(
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
-        # Libération mémoire après l'acquisition Puppeteer
+        
         gc.collect()
 
-        # Sync visuelle pour le Dashboard
+        
         updated_in_ram = shared_ref.get(mission_id)
         if updated_in_ram: save_mission(mission_id, updated_in_ram)
 
@@ -79,17 +79,16 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             current_state["status"] = "analyzing"
             save_mission(mission_id, current_state)
 
-            # Phase 2: LE CERVEAU (IA)
-            # CRITIQUE: On ajoute 'url' à la fin pour que l'IA ait le lien de secours
+            
             report_content = await loop.run_in_executor(
                 executor, generate_arbitrage_report, raw_text, goal, mission_id, shared_ref, url
             )
             
-            # Phase 3: FORMATAGE POUR L'INTERFACE (INTÉGRATION DYNAMIQUE)
+            
             final_state = load_mission(mission_id)
             
             try:
-                # On tente de parser le JSON renvoyé par l'IA
+                
                 ai_data = json.loads(report_content)
                 
                 final_state["report"] = {
@@ -97,7 +96,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
                     "opportunities_found": ai_data.get("deals", [])
                 }
             except Exception as json_err:
-                # Fallback de sécurité si l'IA renvoie du texte brut
+                
                 print(f"DEBUG: JSON Parse fail: {json_err}")
                 final_state["report"] = {
                     "summary": report_content,
@@ -107,7 +106,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             final_state["status"] = "completed"
             save_mission(mission_id, final_state)
             
-            # Nettoyage final des grosses variables
+            
             raw_text = None
             report_content = None
             gc.collect()

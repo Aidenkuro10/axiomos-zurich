@@ -9,10 +9,10 @@ def clean_and_parse_json(raw_text: str):
         return None
         
     try:
-        # 1. Essai direct
+        
         return json.loads(raw_text)
     except json.JSONDecodeError:
-        # 2. Extraction via Regex (cherche entre { } ou [ ])
+        
         match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
         if match:
             try:

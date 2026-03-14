@@ -20,7 +20,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     try:
         log(f"Mission {mission_id}: Initiating FINAL HYBRID UPLINK...", "INFO", shared_storage, mission_id)
         
-        # 1. LANCEMENT DE L'AGENT
+        
         log("Deploying High-Res Puppeteer Core...", "ACTION", shared_storage, mission_id)
         
         data_run = client.actor("apify/puppeteer-scraper").start(
@@ -120,7 +120,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         d_run_id = data_run["id"]
         d_store_id = data_run["defaultKeyValueStoreId"]
 
-        # 2. INJECTION DE L'URL DE NOTRE FLUX VISUEL
+        
         native_live_url = f"https://api.apify.com/v2/key-value-stores/{d_store_id}/records/VUE_DIRECTE?token={token}"
         
         if shared_storage and mission_id in shared_storage:
@@ -128,7 +128,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             save_mission(mission_id, shared_storage[mission_id])
             log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # 3. MONITORING DU STATUT
+        
         while True:
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
@@ -136,7 +136,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                 break
             time.sleep(2)
 
-        # Renvoie le texte brut pour le Cerveau (main.py)
+        
         raw_text_data = client.key_value_store(d_store_id).get_record("RAW_TEXT")
         return raw_text_data["value"] if raw_text_data else None
             

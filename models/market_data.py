@@ -26,12 +26,10 @@ class MarketOpportunity(BaseModel):
             return float(v)
 
         if isinstance(v, str):
-            # 1. On vire les symboles monétaires et les espaces bizarres
-            # On remplace la virgule par rien (séparateur de milliers US) 
-            # et l'apostrophe par rien (séparateur CH)
+            
             v_clean = v.replace(',', '').replace("'", "").replace(" ", "").strip()
             
-            # 2. Extraction du premier nombre (entier ou décimal)
+            
             numbers = re.findall(r"[-+]?\d*\.\d+|\d+", v_clean)
             if numbers:
                 try:
@@ -42,5 +40,5 @@ class MarketOpportunity(BaseModel):
         return 0.0
 
     class Config:
-        # Permet d'accepter les types arbitraires si nécessaire
+        
         arbitrary_types_allowed = True
