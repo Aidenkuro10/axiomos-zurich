@@ -4,6 +4,7 @@ import asyncio
 import os
 import requests
 import json
+import gc # Garbage Collector pour stabiliser la RAM sur Render
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
@@ -39,7 +40,7 @@ class MissionRequest(BaseModel):
 @app.head("/")
 @app.get("/")
 def read_root():
-    return {"status": "online", "service": "LuxSoft Engine", "version": "5.0.0_PRODUCTION"}
+    return {"status": "online", "service": "LuxSoft Engine", "version": "5.3.0_STABLE_FINAL"}
 
 @app.get("/proxy-live/{mission_id}")
 async def proxy_live_image(mission_id: str):
@@ -55,7 +56,7 @@ async def proxy_live_image(mission_id: str):
     return RedirectResponse(url="https://images.unsplash.com/photo-1547996160-81dfa63595dd?q=80&w=1280")
 
 async def execute_mission_task(mission_id: str, url: str, goal: str):
-    """Pipeline d'orchestration Hybride : Œil + Cerveau"""
+    """Pipeline d'orchestration Hybride : Œil + Cerveau avec protection RAM."""
     loop = asyncio.get_event_loop()
     initial_state = load_mission(mission_id)
     shared_ref = {mission_id: initial_state}
@@ -66,6 +67,9 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             executor, launch_apify_automation, url, goal, shared_ref, mission_id
         )
         
+        # Libération mémoire après l'acquisition Puppeteer
+        gc.collect()
+
         # Sync visuelle pour le Dashboard
         updated_in_ram = shared_ref.get(mission_id)
         if updated_in_ram: save_mission(mission_id, updated_in_ram)
@@ -76,9 +80,9 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
             save_mission(mission_id, current_state)
 
             # Phase 2: LE CERVEAU (IA)
-            # Cette fonction renvoie maintenant une chaîne JSON
+            # CRITIQUE: On ajoute 'url' à la fin pour que l'IA ait le lien de secours
             report_content = await loop.run_in_executor(
-                executor, generate_arbitrage_report, raw_text, goal, mission_id, shared_ref
+                executor, generate_arbitrage_report, raw_text, goal, mission_id, shared_ref, url
             )
             
             # Phase 3: FORMATAGE POUR L'INTERFACE (INTÉGRATION DYNAMIQUE)
@@ -94,16 +98,20 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
                 }
             except Exception as json_err:
                 # Fallback de sécurité si l'IA renvoie du texte brut
-                print(f"DEBUG: JSON Parse fail, using raw text fallback: {json_err}")
+                print(f"DEBUG: JSON Parse fail: {json_err}")
                 final_state["report"] = {
                     "summary": report_content,
-                    "opportunities_found": [] # On ne met rien dans la grille pour éviter les crashs JS
+                    "opportunities_found": [] 
                 }
             
             final_state["status"] = "completed"
             save_mission(mission_id, final_state)
             
-            # On log le nombre de deals réels trouvés
+            # Nettoyage final des grosses variables
+            raw_text = None
+            report_content = None
+            gc.collect()
+            
             deals_count = len(final_state["report"].get("opportunities_found", []))
             print(f"--- [SYNC SUCCESS] MISSION {mission_id} | DEALS FOUND: {deals_count} ---")
             
@@ -118,6 +126,7 @@ async def execute_mission_task(mission_id: str, url: str, goal: str):
         if current:
             current["status"] = "error"
             save_mission(mission_id, current)
+        gc.collect()
 
 @app.post("/run-mission")
 async def start_mission(
@@ -126,14 +135,15 @@ async def start_mission(
     x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")
 ):
     received = str(x_axiomos_auth or "").strip().replace('"', '').replace("'", "")
-    if received != str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", ""):
+    expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
+    if received != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     mission_id = str(uuid.uuid4())[:8]
     initial_data = {
         "status": "running",
         "stream_url": None, 
-        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Telemetry Online. Scanning luxury market..."}],
+        "live_logs": [{"timestamp": time.strftime("%H:%M:%S"), "level": "INFO", "message": "Telemetry Online. Memory Guard Active."}],
         "report": None
     }
     save_mission(mission_id, initial_data)
@@ -143,7 +153,8 @@ async def start_mission(
 @app.get("/mission-status/{mission_id}")
 async def get_mission_status(mission_id: str, x_axiomos_auth: Optional[str] = Header(None, alias="X-Axiomos-Auth")):
     received = str(x_axiomos_auth or "").strip().replace('"', '').replace("'", "")
-    if received != str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", ""):
+    expected = str(AXIOMOS_INTERNAL_AUTH).strip().replace('"', '').replace("'", "")
+    if received != expected:
          raise HTTPException(status_code=401, detail="Unauthorized")
 
     mission = load_mission(mission_id)
