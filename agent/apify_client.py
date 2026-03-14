@@ -7,8 +7,8 @@ from utils.database import save_mission
 
 def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
     """
-    Orchestrateur LuxSoft - Version SNIPER ELITE HYBRIDE.
-    Explosion des popups, flux live et moisson de texte brut pour l'IA.
+    Orchestrateur LuxSoft - Version BLITZ & SNIPER.
+    Navigation ultra-rapide et capture des URLs réelles pour supprimer les erreurs 404.
     """
     token = get_apify_token()
     if not token:
@@ -30,8 +30,6 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                     const { page, log } = context;
                     await page.setViewport({ width: 1280, height: 1000 });
                     
-                    const sentItems = new Set();
-
                     // --- A. CAPTURE IMMÉDIATE (ANTI-ÉCRAN NOIR) ---
                     const firstShot = await page.screenshot();
                     await context.setValue('VUE_DIRECTE', firstShot, { contentType: 'image/png' });
@@ -44,68 +42,38 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
                                         .find(b => b.innerText.includes('OK') || b.innerText.includes('accepter') || b.innerText.includes('Accept'));
                             if (btn) btn.click();
                         });
-                        await new Promise(r => setTimeout(r, 2000));
+                        await new Promise(r => setTimeout(r, 1500));
                         log.info('Cookies cleared, field of view open.');
-                    } catch (e) { log.info('Cookies already handled or bypass failed.'); }
+                    } catch (e) { log.info('Cookies bypass failed or unnecessary.'); }
 
-                    // --- C. ATTENTE DU CONTENU ---
-                    try {
-                        await page.waitForSelector('.article-item, [data-testid="article-card"]', { timeout: 10000 });
-                    } catch (e) { log.info('Selector timeout, proceeding with raw scan.'); }
-
-                    // --- D. BOUCLE D'EXTRACTION ET SCROLL ---
-                    for (let i = 0; i < 12; i++) {
-                        // Capture visuelle pour le dashboard
-                        const screenshot = await page.screenshot();
+                    // --- C. BOUCLE D'EXTRACTION BLITZ & SNIPER (VITESSE + URLs) ---
+                    let accumulatedData = "";
+                    for (let i = 0; i < 6; i++) {
+                        // Capture visuelle optimisée (Blitz)
+                        const screenshot = await page.screenshot({ quality: 50 });
                         await context.setValue('VUE_DIRECTE', screenshot, { contentType: 'image/png' });
                         
-                        const visibleItems = await page.evaluate((alreadySent) => {
-                            const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card, div[class*="item"]');
-                            const foundNow = [];
+                        // Extraction Sniper : On force la capture de l'URL pour éviter le 404
+                        const cardsData = await page.evaluate(() => {
+                            const cards = document.querySelectorAll('.article-item, [data-testid="article-card"], .article-card');
+                            return Array.from(cards).map(card => {
+                                const link = card.querySelector('a')?.href || "No URL";
+                                return `[SOURCE_URL: ${link}] Data: ${card.innerText.replace(/\\n/g, ' ')}`;
+                            }).join('\\n---\\n');
+                        });
+                        
+                        accumulatedData += cardsData + "\\n";
 
-                            cards.forEach(card => {
-                                const text = card.innerText || "";
-                                const titleEl = card.querySelector('h1, h2, h3, .article-title, .nm, [data-testid="article-title"]');
-                                const priceMatch = text.match(/(\\d[\\d\\s',.]*)\\s?(CHF|€|\\$|EUR|USD)/i);
-
-                                if (priceMatch) {
-                                    const title = titleEl ? titleEl.innerText.trim() : text.split('\\n')[0].substring(0, 40).trim();
-                                    const cleanPrice = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
-                                    const itemID = `${title.substring(0,20)}-${cleanPrice}`;
-
-                                    const isSub = title.toLowerCase().includes('submariner');
-                                    const isDuplicate = alreadySent.includes(itemID);
-
-                                    if (isSub && !isDuplicate && cleanPrice > 4000 && cleanPrice < 60000) {
-                                        foundNow.push({
-                                            "id": itemID,
-                                            "title": title,
-                                            "price": cleanPrice,
-                                            "url": card.querySelector('a')?.href || window.location.href,
-                                            "brand": "Rolex",
-                                            "condition": "Pre-owned"
-                                        });
-                                    }
-                                }
-                            });
-                            return foundNow;
-                        }, Array.from(sentItems));
-
-                        if (visibleItems.length > 0) {
-                            visibleItems.forEach(item => sentItems.add(item.id));
-                            await context.pushData(visibleItems);
-                        }
-
-                        // Scroll forcé pour découvrir de nouvelles zones
-                        await page.evaluate((step) => { window.scrollTo(0, step * 800); }, i + 1);
-                        await new Promise(r => setTimeout(r, 2000));
+                        // Scroll Blitz (plus rapide)
+                        await page.evaluate((step) => { window.scrollTo(0, step * 1200); }, i + 1);
+                        await new Promise(r => setTimeout(r, 800)); 
                     }
                     
-                    // --- E. MOISSON FINALE (RAW TEXT) POUR LE SMART ANALYZER ---
-                    const fullText = await page.evaluate(() => document.body.innerText);
-                    await context.setValue('RAW_TEXT', fullText);
+                    // --- D. MOISSON FINALE (RAW TEXT) POUR LE SMART ANALYZER ---
+                    const fullPageText = await page.evaluate(() => document.body.innerText);
+                    await context.setValue('RAW_TEXT', accumulatedData + "\\n\\nFULL_BODY_TEXT:\\n" + fullPageText);
                     
-                    log.info('Mission de navigation et synchronisation terminée.');
+                    log.info('Mission de navigation Blitz terminée.');
                 }""",
                 "proxyConfiguration": {
                     "useApifyProxy": True,
@@ -128,15 +96,15 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
             save_mission(mission_id, shared_storage[mission_id])
             log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
-        # 3. MONITORING DU STATUT
+        # 3. MONITORING DU STATUT (RÉACTIF)
         while True:
             d_details = client.run(d_run_id).get()
             d_status = d_details.get("status")
             if d_status in ["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]:
                 break
-            time.sleep(2)
+            time.sleep(1) # Check toutes les secondes pour gagner en réactivité
 
-        # Renvoie le texte brut pour le Cerveau (main.py)
+        # Renvoie le texte brut enrichi des URLs pour le Cerveau (main.py)
         raw_text_data = client.key_value_store(d_store_id).get_record("RAW_TEXT")
         return raw_text_data["value"] if raw_text_data else None
             
