@@ -5,8 +5,8 @@ from utils.logger import log
 
 def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=None, target_url=None):
     """
-    LE CERVEAU : Version LUXSOFT ELITE.
-    Correction chirurgicale du formatage du rapport et de la précision des liens (Sniping).
+    LE CERVEAU : Version LUXSOFT DYNAMIC SNIPER.
+    Intelligence universelle : extraction d'IDs et de références sans listes restrictives.
     """
     log(f"Mission {mission_id}: Analyse stratégique et extraction des opportunités...", "ACTION", shared_storage, mission_id)
     
@@ -23,35 +23,32 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
     ANALYSIS RULES:
     1. SUMMARY: Write a professional market analysis in ENGLISH. 
        STRICT FORMATTING: Use double line breaks (\\n\\n) to create distinct blocks. 
-       Start with a market overview, followed by specific insights on the deals found below.
-    2. COHERENCE: Ensure the prices mentioned in your summary match the data of the extracted deals.
-    3. DETECTION: Extract as many valid Rolex Submariner deals as possible. Don't be too restrictive, but prioritize items with prices.
+    2. COHERENCE: The summary must strictly match the prices and models found in the deals list.
+    3. DETECTION: Extract EVERY valid Rolex Submariner deal found. Do not limit yourself to specific nicknames.
 
-    URL HIERARCHY (STRICT ENFORCEMENT):
-    1. Priority 1 (Deep Link): Extract the 8-9 digit Ad ID from the data -> https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
-    2. Priority 2 (Nicknames to Ref):
-       - If 'Hulk' -> use ref 116610LV -> https://www.chrono24.ch/rolex/ref-116610lv.htm
-       - If 'Kermit' -> use ref 16610LV -> https://www.chrono24.ch/rolex/ref-16610lv.htm
-       - If 'Starbucks' -> use ref 126610LV -> https://www.chrono24.ch/rolex/ref-126610lv.htm
-       - If 'Smurf' -> use ref 116619LB -> https://www.chrono24.ch/rolex/ref-116619lb.htm
-    3. Priority 3 (Generic Ref): Use any 5-6 digit ref found (16800, 116610, etc) -> https://www.chrono24.ch/rolex/ref-[REF].htm
-    4. Fallback: ONLY use {backup_url} if no ID or Ref is found.
+    UNIVERSAL URL LOGIC (STRICT):
+    - PRIORITY 1 (The Sniper): Find the 8-9 digit Ad ID (watchId) for the watch. 
+      Link: https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
+    - PRIORITY 2 (The Analyst): If no ID, find the technical Reference (e.g., 16800, 116610LV, 126610, etc.).
+      Link: https://www.chrono24.ch/rolex/ref-[REF].htm
+    - NICKNAME TRANSLATION: If you identify a 'Hulk', 'Kermit', or 'Starbucks', you MUST find its technical reference in the data to build a Priority 2 link.
+    - NO GENERIC LINKS: Never return a link with only 'Rolex' if data is available.
 
     JSON STRUCTURE:
     {{
-      "summary": "First block here.\\n\\nSecond block about deals...\\n\\nFinal advice.",
+      "summary": "Context block.\\n\\nDetailed insights...\\n\\nStrategic advice.",
       "deals": [
         {{
           "brand": "Rolex",
-          "model_name": "Exact Model & Ref",
+          "model_name": "Full Model & Reference",
           "listed_price": 0,
-          "source_url": "Constructed URL",
+          "source_url": "Dynamic URL based on ID or Ref",
           "high_value_signal": true
         }}
       ]
     }}
 
-    DATA:
+    DATA TO SCAN:
     {optimized_text}
     """
 
@@ -59,11 +56,11 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
         response = client.chat.completions.create(
             model="gpt-4o", 
             messages=[
-                {"role": "system", "content": "You are a world-class watch market expert. You excel at extracting Ad IDs and References to build precise URLs. Deliver a structured analysis with double line breaks (\\n\\n) in JSON."},
+                {"role": "system", "content": "You are a surgical data extractor. You do not use fixed lists; you extract IDs and references dynamically from the raw text to build precise URLs. Double line breaks in summary. JSON only."},
                 {"role": "user", "content": prompt}
             ],
             response_format={ "type": "json_object" },
-            temperature=0.2 # Baisse légère pour stabiliser l'extraction des IDs
+            temperature=0.1 # On baisse à 0.1 pour supprimer la paresse et forcer la recherche d'IDs
         )
         
         return response.choices[0].message.content
