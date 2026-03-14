@@ -6,7 +6,7 @@ from utils.logger import log
 def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=None, target_url=None):
     """
     LE CERVEAU : Version LUXSOFT DYNAMIC SNIPER - ULTIMATE PRECISION.
-    Extraction dynamique avec verrouillage de proximité pour éviter les collisions de données.
+    Extraction dynamique avec verrouillage de proximité et cohérence factuelle stricte.
     """
     log(f"Mission {mission_id}: Analyse stratégique et extraction des opportunités...", "ACTION", shared_storage, mission_id)
     
@@ -23,7 +23,7 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
     ANALYSIS RULES:
     1. SUMMARY: Write a professional market analysis in ENGLISH. 
        STRICT FORMATTING: Use double line breaks (\\n\\n) to create distinct blocks. 
-    2. COHERENCE: The summary must strictly match the prices and models found in the deals list.
+    2. COHERENCE: The summary must strictly match the prices and models found in the deals list. DO NOT invent external market averages; only mention price trends and minimums based strictly on the data extracted below.
     3. DETECTION: Extract EVERY valid Rolex Submariner deal found.
 
     SURGICAL EXTRACTION RULES:
@@ -57,11 +57,11 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
         response = client.chat.completions.create(
             model="gpt-4o", 
             messages=[
-                {"role": "system", "content": "You are a surgical data extractor. You link prices to their specific IDs by verifying data proximity. No hallucinations. JSON only."},
+                {"role": "system", "content": "You are a surgical data extractor. You link prices to their specific IDs by verifying data proximity. You only report prices found in the provided data. No hallucinations. JSON only."},
                 {"role": "user", "content": prompt}
             ],
             response_format={ "type": "json_object" },
-            temperature=0.1 # Verrouillage de la créativité pour une précision totale
+            temperature=0.1 
         )
         
         return response.choices[0].message.content
