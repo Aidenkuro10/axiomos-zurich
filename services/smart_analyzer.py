@@ -5,36 +5,36 @@ from utils.logger import log
 
 def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=None, target_url=None):
     """
-    LE CERVEAU : Version Sniper Anti-Référence.
-    Force l'IA à ignorer les références (126610LV) pour ne prendre que les IDs numériques.
+    LE CERVEAU : Version Roc (Stabilité Max).
+    Priorité : Finir la mission sans crash.
     """
-    log(f"Mission {mission_id}: Filtrage strict des IDs vs Références...", "ACTION", shared_storage, mission_id)
+    log(f"Mission {mission_id}: Analyse simplifiée pour stabilité...", "ACTION", shared_storage, mission_id)
     
     client = openai.OpenAI(api_key=get_openai_key())
     backup_url = target_url if target_url else "https://www.chrono24.ch"
     
-    optimized_text = raw_text[:25000] 
+    # On descend à 15k caractères. C'est BEAUCOUP plus léger pour la RAM.
+    optimized_text = raw_text[:15000] 
     
     prompt = f"""
-    You are a forensic data extractor for Axiomos. 
-    Task: Extract real Rolex Submariner listings.
+    Task: Extract Rolex Submariner deals. 
+    Language: ENGLISH ONLY.
 
-    ID EXTRACTION PROTOCOL (STRICT):
-    1. THE ID: Look for a 7, 8 or 9 digit number (e.g., 38472910).
-    2. THE REF (FORBIDDEN AS ID): Numbers like 16800, 116610, 126610LV are REFERENCES. 
-       NEVER use them in the watchId or query ID.
-    3. IF NO 8-DIGIT ID IS FOUND: Do not extract the item.
-    4. BYPASS LINK: https://www.chrono24.ch/search/index.htm?query=ID+[ID]&dosearch=true
+    RULES:
+    1. Find the listed price.
+    2. Find any numerical ID (7-9 digits) or just the model reference.
+    3. Use this URL format: https://www.chrono24.ch/rolex/index.htm?query=rolex+[ID]
+    4. If no ID, use: {backup_url}
 
     JSON STRUCTURE:
     {{
-      "summary": "English analysis.",
+      "summary": "Quick market update.",
       "deals": [
         {{
           "brand": "Rolex",
-          "model_name": "Full Model Name (ex: Submariner 126610LV)",
+          "model_name": "Model Name",
           "listed_price": 0,
-          "source_url": "https://www.chrono24.ch/search/index.htm?query=ID+[ID]&dosearch=true",
+          "source_url": "URL",
           "high_value_signal": true
         }}
       ]
@@ -45,18 +45,19 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
     """
 
     try:
+        # Temperature 0.2 pour un compromis vitesse/précision
         response = client.chat.completions.create(
-            model="gpt-4o", 
+            model="gpt-4o-mini", # On passe sur mini pour la VITESSE et éviter le timeout Render
             messages=[
-                {"role": "system", "content": "You are a sniper data extractor. Respond ONLY in JSON. Only extract 8-9 digit numerical IDs."},
+                {"role": "system", "content": "Fast JSON extractor."},
                 {"role": "user", "content": prompt}
             ],
             response_format={ "type": "json_object" },
-            temperature=0
+            temperature=0.2
         )
         
         return response.choices[0].message.content
         
     except Exception as e:
         log(f"💥 Brain Error: {str(e)}", "ERROR", shared_storage, mission_id)
-        return json.dumps({"summary": "Error", "deals": []})
+        return json.dumps({"summary": "Safety fallback.", "deals": []})
