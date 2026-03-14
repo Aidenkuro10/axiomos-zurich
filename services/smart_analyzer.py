@@ -5,15 +5,15 @@ from utils.logger import log
 
 def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=None, target_url=None):
     """
-    LE CERVEAU : Version LUXSOFT ELITE SNIPER.
-    Correction chirurgicale : Verrouillage ID/Modèle et rapport ultra-compact.
+    LE CERVEAU : Version LUXSOFT ELITE.
+    Restaure l'analyse détaillée et augmente le volume de détection.
     """
     log(f"Mission {mission_id}: Analyse stratégique et extraction des opportunités...", "ACTION", shared_storage, mission_id)
     
     client = openai.OpenAI(api_key=get_openai_key())
     backup_url = target_url if target_url else "https://www.chrono24.ch"
     
-    # Conservation du volume de données stable (25k)
+    # On remonte à 25k pour voir plus de montres sur la page
     optimized_text = raw_text[:25000] 
     
     prompt = f"""
@@ -21,24 +21,22 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
     GOAL: {goal}
 
     ANALYSIS RULES:
-    1. SUMMARY: Write a professional market analysis in ENGLISH. 
-       - BE CONCISE: Max 2-3 short sentences per block.
-       - STRICT FORMATTING: Use double line breaks (\\n\\n) between blocks.
-       - Ensure price mentions match the specific deals extracted below.
-    2. DETECTION: Extract ALL valid Rolex Submariner deals. 
-    3. DATA INTEGRITY: Do not mix data. Each watch name must be linked to its specific Price and its specific Ad ID.
+    1. SUMMARY: Write a professional, detailed market analysis in ENGLISH. Explain the current price trends for the Submariners found. Be insightful.
+    2. DETECTION: Extract as many valid Rolex Submariner deals as possible. Don't be too restrictive, but prioritize items with prices.
 
-    URL HIERARCHY (ZERO HALLUCINATION):
-    - Priority 1: Use the specific 8-9 digit Ad ID found next to the watch.
-      FORMAT: https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
-    - Priority 2: Use the Reference number.
-      FORMAT: https://www.chrono24.ch/rolex/ref-[REF].htm
-    - Priority 3: Nicknames only if ID/Ref are missing.
-    - NEVER return a generic link or a link to another brand.
+    URL HIERARCHY:
+    1. Priority 1 (Direct): 8-9 digit Ad ID -> https://www.chrono24.ch/rolex/index.htm?watchId=[ID]
+    2. Priority 2 (Nicknames): 
+       - 'Hulk' -> 116610LV
+       - 'Kermit' -> 16610LV
+       - 'Starbucks' -> 126610LV
+       - 'Smurf' -> 116619LB
+    3. Priority 3 (Reference): If you see any 5 or 6 digit ref (16800, 116610, etc) -> https://www.chrono24.ch/rolex/ref-[REF].htm
+    4. Fallback: {backup_url}
 
     JSON STRUCTURE:
     {{
-      "summary": "Market status (brief).\\n\\nDeal insights (brief).\\n\\nStrategy (brief).",
+      "summary": "Your detailed professional analysis here...",
       "deals": [
         {{
           "brand": "Rolex",
@@ -58,12 +56,11 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
         response = client.chat.completions.create(
             model="gpt-4o", 
             messages=[
-                {"role": "system", "content": "You are a sniper. You link the correct watchId to the correct watch. You are concise. No hallucinations. JSON output only."},
+                {"role": "system", "content": "You are a world-class watch market expert. Deliver a detailed analysis and extract every single viable deal in JSON."},
                 {"role": "user", "content": prompt}
             ],
             response_format={ "type": "json_object" },
-            # Température abaissée à 0.1 pour une précision maximale sur les IDs
-            temperature=0.1
+            temperature=0.3 # On remonte un peu la température pour plus de "choix" et de rédaction
         )
         
         return response.choices[0].message.content
