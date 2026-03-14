@@ -55,13 +55,13 @@ def generate_arbitrage_report(raw_text, goal, mission_id=None, shared_storage=No
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o", 
+            model="gpt-4o-mini", 
             messages=[
                 {"role": "system", "content": "You are a surgical data extractor. You link prices to their specific IDs by verifying data proximity. You only report prices found in the provided data. No hallucinations. JSON only."},
                 {"role": "user", "content": prompt}
             ],
             response_format={ "type": "json_object" },
-            temperature=0.1 
+            temperature=0.2 
         )
         
         return response.choices[0].message.content
