@@ -126,7 +126,7 @@ def launch_apify_automation(url, goal, shared_storage=None, mission_id=None):
         if shared_storage and mission_id in shared_storage:
             shared_storage[mission_id]["stream_url"] = native_live_url
             save_mission(mission_id, shared_storage[mission_id])
-            log(f"🚀 UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
+            log(f" UPLINK & DATA SYNC SECURED: {d_run_id}", "SUCCESS", shared_storage, mission_id)
 
         
         while True:

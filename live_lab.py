@@ -4,13 +4,13 @@ import sys
 
 async def run_live_test():
     BROWSERLESS_TOKEN = "2U8pU0KV8AsDyW15455bc735c6a50b3adf6de8ce34e340f5a"
-    # URL modifiée avec /pyppeteer
+    
     endpoint = f"wss://chrome.browserless.io/pyppeteer?token={BROWSERLESS_TOKEN}"
     
     print(f"🔗 Tentative de connexion à : {endpoint}")
     
     try:
-        # On ajoute un timeout explicite de 20 secondes pour ne pas attendre pour rien
+        
         browser = await connect(browserWSEndpoint=endpoint, dumpio=True)
         print("✅ CONNECTÉ AU NAVIGATEUR !")
         
